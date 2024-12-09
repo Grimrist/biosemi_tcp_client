@@ -47,9 +47,6 @@ s.connect((TCP_IP, TCP_PORT))
 # to give us an array of the right size and type).
 signal_buffer = numpy.arange(32*(SAMPLES))
 
-# Write to file for debugging
-f = open("debug.txt", "w")
-
 # Calculate spectrum 50 times
 for i in range(50):
     # Parse incoming frame data
@@ -62,7 +59,6 @@ for i in range(50):
     for n in range(32):
         # Read the next packet from the network
         data = s.recv(BUFFER_SIZE)
-        f.write(data)
         # Extract all channel samples from the packet
         for m in range(SAMPLES):
             offset = (m * 3 * (CHANNELS+EX_NODES)) + 32 # Let's try reading the EX electrode?
