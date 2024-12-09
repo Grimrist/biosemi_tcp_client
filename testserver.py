@@ -1,87 +1,67 @@
-#
-# test_plot.py - Written by Jack Keegan
-# Last updated 16-1-2014
-#
-# This short Python program receives data from the
-# BioSemi ActiveTwo acquisition system via TCP/IP.
-#
-# Each packet received contains 16 3-byte samples
-# for each of 8 channels. The 3 bytes in each sample
-# arrive in reverse order (least significant byte first)
-#
-# Samples for all 8 channels are interleaved in the packet.
-# For example, the first 24 bytes in the packet store
-# the first 3-byte sample for all 8 channels. Only channel
-# 1 is used here - all other channels are discarded.
-#
-# The total packet size is 8 x 16 x 3 = 384.
-# (That's channels x samples x bytes-per-sample)
-#
-# 512 samples are accumulated from 32 packets.
-# A DFT is calculated using numpy's fft function.
-# the first DFT sample is set to 0 because the DC
-# component will otherwise dominates the plot.
-# The real part of the DFT (all 512 samples) is plotted.
-# That process is repeated 50 times - the same
-# matplotlib window is updated each time.
-#
- 
-import numpy                     # Used to calculate DFT
-import matplotlib.pyplot as plt  # Used to plot DFT
-import socket                    # used for TCP/IP communication
-  
+import numpy    # Used to calculate DFT
+import socket   # used for TCP/IP communication
+
+import sys
+from threading import Thread
+from time import sleep
+
+from PyQt6.QtWidgets import QApplication
+
+from pglive.sources.data_connector import DataConnector
+from pglive.sources.live_plot import LiveLinePlot
+from pglive.sources.live_plot_widget import LivePlotWidget
+from pglive.sources.live_axis_range import LiveAxisRange
+
 # TCP/IP setup
-TCP_IP = '10.31.124.149' # ActiView is running on the same PC
+TCP_IP = '127.0.0.1' # ActiView is running on the same PC
 TCP_PORT = 8888       # This is the port ActiView listens on
 CHANNELS = 32 # Amount of channels sent via TCP
 SAMPLES = 64 # Samples per channel
 EX_NODES = 8 # EX electrodes
 BUFFER_SIZE = (CHANNELS+EX_NODES) * SAMPLES * 3 # Data packet size 
+PHYS_MAX = 262143
+PHYS_MIN = -262144
+DIGI_MAX = 8388607
+DIGI_MIN = -8388608
 
 # Open socket
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect((TCP_IP, TCP_PORT))
- 
-# Create a 512-sample signal_buffer (arange fills the array with
-# values, but these will be overwritten; We're just using arange
-# to give us an array of the right size and type).
-signal_buffer = numpy.arange(32*(SAMPLES))
 
-# Calculate spectrum 50 times
-for i in range(50):
-    # Parse incoming frame data
-    print("Parsing data")
-     
-    # Data buffer index (counts from 0 up to 512)
-    buffer_idx = 0
-     
-    # collect 32 packets to fill the window
-    for n in range(32):
+# pgplot example
+app = QApplication(sys.argv)
+# , y_range_controller=LiveAxisRange(fixed_range=[-100, 100])
+plot_widget = LivePlotWidget(title="Line Plot @ 100Hz")
+plot_curve = LiveLinePlot()
+plot_curve
+plot_widget.addItem(plot_curve)
+# DataConnector holding 600 points and plots @ 100Hz
+data_connector = DataConnector(plot_curve, max_points=600, update_rate=100)
+
+def readData(connector):
+    x = 0
+    while True:
         # Read the next packet from the network
         data = s.recv(BUFFER_SIZE)
         # Extract all channel samples from the packet
         for m in range(SAMPLES):
-            offset = (m * 3 * (CHANNELS+EX_NODES)) + 32 # Let's try reading the EX electrode?
-            # The 3 bytes of each sample arrive in reverse order
-            sample = (data[offset+2]) << 16
-            sample += (data[offset+1]) << 8
-            sample += (data[offset])
-            # Store sample to signal buffer
-            signal_buffer[buffer_idx] = sample
-            buffer_idx += 1
-     
-    # Calculate DFT ("sp" stands for spectrum)
-    sp = numpy.fft.fft(signal_buffer)
-    sp[0] = 0 # eliminate DC component
-     
-    # Plot spectrum
-    print("Plotting data")
-    plt.plot(sp.real)
+            offset = (m * 3 * (CHANNELS+EX_NODES))
+            # The 3 bytes of each sample arrive in reverse order (little endian)
+            # We convert them to a 32bit integer via bytearray extending
+            # According to documentation, we add a zero byte as LSB
+            sample = bytearray(1)
+            sample.append(data[offset])
+            sample.append(data[offset+1])
+            sample.append(data[offset+2])
+            value = int.from_bytes(sample, byteorder='little', signed=True)
 
-    # Plot data
-    plt.figure()
-    plt.plot(signal_buffer)
-    plt.show()
- 
-# Close socket
-s.close()
+            # Apply gain based on physical max/min and digital max/min
+            gain = (PHYS_MAX - PHYS_MIN)/(DIGI_MAX - DIGI_MIN)
+            # Send sample to plot
+            connector.cb_append_data_point(value*gain, x)
+            x += 1
+        
+plot_widget.show()
+# Start sin_wave_generator in new Thread and send data to data_connector
+Thread(target=readData, args=(data_connector,)).start()
+app.exec()
