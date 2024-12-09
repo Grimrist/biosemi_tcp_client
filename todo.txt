@@ -1,0 +1,3 @@
+- Add channel selection to realtime plot
+- Determine ADC range to properly display uV values
+- Try detecting fft values (probably through separate thread? Need to figure out if Python does global variables)
