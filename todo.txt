@@ -1,3 +1,4 @@
+- Handle errors due to dropped packets/data loss
 - Add multi-channel display (currently doesn't allow changing channel live properly, also need y axis offset?)
 - Determine ADC range to properly display uV values
 - Try detecting fft amplitude values (probably through separate thread? Need to figure out if Python does global variables)
