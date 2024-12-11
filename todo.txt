@@ -1,4 +1,5 @@
+- Use better data sharing model between widgets
+- Implement Welsh FFT properly (allow channel selection)
 - Handle errors due to dropped packets/data loss
-- Add multi-channel display (currently doesn't allow changing channel live properly, also need y axis offset?)
 - Determine ADC range to properly display uV values
-- Try detecting fft amplitude values (probably through separate thread? Need to figure out if Python does global variables)
+- Try detecting fft amplitude values

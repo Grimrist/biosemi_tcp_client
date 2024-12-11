@@ -4,7 +4,7 @@ import socket   # used for TCP/IP communication
 import sys
 from threading import Thread
 from time import sleep
-
+from collections import deque
 from PyQt6 import QtWidgets, QtCore, QtGui
 from scipy import signal # Filtering
 import pyqtgraph
@@ -62,17 +62,26 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(graph_window)
         main_widget.setLayout(main_layout)
 
-        ## Connect events
+        ### Signal connections
         # Connection settings
         selection_window.ip_box.textChanged.connect(graph_window.setIP)
         selection_window.port_box.textChanged.connect(graph_window.setPort)
+        selection_window.samples_box.textChanged.connect(graph_window.setSamples)
+        selection_window.fs_box.textChanged.connect(graph_window.setSamplingRate)
+        selection_window.channels_box.textChanged.connect(graph_window.setTotalChannels)
 
         # Graph control
         selection_window.channel_selector.selectionModel().selectionChanged.connect(graph_window.setActiveChannels)
         selection_window.reference_selector.selectionModel().selectionChanged.connect(graph_window.setReference)
-
+        
         selection_window.start_button.clicked.connect(graph_window.startCapture)
         selection_window.stop_button.clicked.connect(graph_window.stopCapture)
+
+        # FFT settings
+        selection_window.welch_window_box.valueChanged.connect(graph_window.setWelchWindow)
+
+        ###
+
         # Show window
         self.setCentralWidget(main_widget)
         self.show()
@@ -120,8 +129,17 @@ class SelectionWindow(QtWidgets.QWidget):
         self.ip_box.setText(TCP_IP)
         self.port_box = QtWidgets.QLineEdit()
         self.port_box.setText(str(TCP_PORT))
+        self.channels_box = QtWidgets.QLineEdit()
+        self.channels_box.setText(str(CHANNELS + EX_NODES))
+        self.samples_box = QtWidgets.QLineEdit()
+        self.samples_box.setText(str(64))
+        self.fs_box = QtWidgets.QLineEdit()
+        self.fs_box.setText(str(16000))
         connection_layout.addRow(QtWidgets.QLabel("IP"), self.ip_box)
         connection_layout.addRow(QtWidgets.QLabel("Port"), self.port_box)
+        connection_layout.addRow(QtWidgets.QLabel("Total Channels"), self.channels_box)
+        connection_layout.addRow(QtWidgets.QLabel("Samples"), self.samples_box)
+        connection_layout.addRow(QtWidgets.QLabel("Sampling rate [Hz]"), self.fs_box)
         selection_layout.addWidget(connection_frame)
         connection_frame.setLayout(connection_layout)
 
@@ -162,26 +180,23 @@ class SelectionWindow(QtWidgets.QWidget):
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         selection_layout.addItem(verticalSpacer) 
 
-        # Filter settings (FIR)
-        filter_frame = QtWidgets.QFrame()
-        filter_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
-        filter_layout = QtWidgets.QVBoxLayout()
-        self.filter_checkbox = QtWidgets.QCheckBox("Filtering")
-        filter_layout.addWidget(self.filter_checkbox)
+        # FFT settings
+        fft_frame = QtWidgets.QFrame()
+        fft_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
+        fft_layout = QtWidgets.QVBoxLayout()
+        self.fft_checkbox = QtWidgets.QCheckBox("FFT")
+        fft_layout.addWidget(self.fft_checkbox)
 
-        filter_settings = QtWidgets.QWidget()
-        filter_settings_layout = QtWidgets.QFormLayout()
-        self.lowpass_box = QtWidgets.QSpinBox()
-        self.lowpass_box.setValue(1)
-        self.highpass_box = QtWidgets.QSpinBox()
-        self.highpass_box.setValue(1)
-        filter_settings_layout.addRow(QtWidgets.QLabel("Low pass FIR Filter Cut-off [Hz]"), self.lowpass_box)
-        filter_settings_layout.addRow(QtWidgets.QLabel("High pass FIR Filter Cut-off [Hz]"), self.highpass_box)
-        filter_layout.addWidget(filter_settings)
+        fft_settings = QtWidgets.QWidget()
+        fft_settings_layout = QtWidgets.QFormLayout()
+        self.welch_window_box = QtWidgets.QSpinBox()
+        self.welch_window_box.setValue(1)
+        fft_settings_layout.addRow(QtWidgets.QLabel("Welch Window [samples]"), self.welch_window_box)
+        fft_settings.setLayout(fft_settings_layout)
 
-        filter_settings.setLayout(filter_settings_layout)
-        filter_frame.setLayout(filter_layout)
-        selection_layout.addWidget(filter_frame)
+        fft_layout.addWidget(fft_settings)
+        fft_frame.setLayout(fft_layout)
+        selection_layout.addWidget(fft_frame)
 
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         selection_layout.addItem(verticalSpacer) 
@@ -202,8 +217,14 @@ class SelectionWindow(QtWidgets.QWidget):
 class GraphWindow(QtWidgets.QWidget):
     def __init__(self, electrodes_model):
         super().__init__()
+        self.fs = 20
         self.ip = TCP_IP
         self.port = TCP_PORT
+        self.samples = SAMPLES
+        self.total_channels = CHANNELS + EX_NODES
+        self.lowpass_freq = 0.5
+        self.highpass_freq = 100
+        self.welch_enabled = True
         self.is_capturing = False
         self.electrodes_model = electrodes_model
         self.graph_layout = QtWidgets.QVBoxLayout()
@@ -228,6 +249,22 @@ class GraphWindow(QtWidgets.QWidget):
         for i in selection.indexes():
             self.electrodes_model[0].itemFromIndex(i.siblingAtColumn(2)).setData(QtCore.QVariant(True))
 
+    def setSamples(self, samples):
+        self.samples = int(samples)
+
+    def setSamplingRate(self, fs):
+        self.fs = int(fs)
+
+    def setTotalChannels(self, channels):
+        self.total_channels = int(channels)
+
+    def setWelchWindow(self, window):
+        self.welch_window = int(window)
+    
+    def enableWelch(self, enable):
+        self.welch_enabled = bool(enable)
+    
+    
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
     def startCapture(self):
@@ -243,10 +280,17 @@ class GraphWindow(QtWidgets.QWidget):
             self.data_connectors.append(DataConnector(plot, max_points=150, plot_rate=30))
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
+        #for FFT
+        for i in range(32):
+            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/32, 0.8, 0.9))
+            self.data_connectors.append(DataConnector(plot, plot_rate=30))
+            self.plots.append(plot)
+            self.plot_widget.addItem(plot)
         self.is_capturing = True
         self.data_thread = Thread(target=self.readData, args=(self.electrodes_model, self.data_connectors))
         self.data_thread.start()
         print("Reading from ip %s and port %s" % (self.ip, self.port))
+
     def stopCapture(self):
         if not self.is_capturing:
             return
@@ -262,24 +306,21 @@ class GraphWindow(QtWidgets.QWidget):
         if not DEBUG:
             self.sock.close()        
 
-
     ##  TCP packet format (2 channels example). Each sample is 24-bits, little-endian.
     ##  To convert to a 32-bit integer, we add a 0-byte to the LSB before converting to big-endian.
     ##  ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗
     ##  ║ C1S1 ║║ C1S1 ║║ C1S1 ║ ║ C2S1 ║║ C2S1 ║║ C2S1 ║ ║ C1S2 ║║ C1S2 ║║ C1S2 ║ ║ C2S2 ║║ C2S2 ║║ C2S2 ║
     ##  ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║
     ##  ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝
-    ##  
-    ##  
     def readData(self, electrodes_model, data_connectors):
         x = 0
         # Apply gain based on physical max/min and digital max/min
         gain = (PHYS_MAX - PHYS_MIN)/(DIGI_MAX - DIGI_MIN)
-        total_channels = (CHANNELS+EX_NODES)
         active_channels = []
         active_reference = -1
         model = electrodes_model[0]
-
+        welch_buffer = deque(maxlen=1024)
+        buffer_size = self.total_channels * self.samples * 3
         for i in range(model.rowCount()):
             # Select active channels
             idx = model.index(i,1)
@@ -293,15 +334,15 @@ class GraphWindow(QtWidgets.QWidget):
         while True:
             if DEBUG:
                 rng = numpy.random.default_rng()
-                data = rng.bytes(BUFFER_SIZE)
+                data = rng.bytes(buffer_size)
             else:
                 # Read the next packet from the network
-                data = self.sock.recv(BUFFER_SIZE)
+                data = self.sock.recv(buffer_size)
 
             # Extract all channel samples from the packet
-            for m in range(SAMPLES):
+            for m in range(self.samples):
                 # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
-                ref_offset = (m * 3 * total_channels) + (active_reference*3)
+                ref_offset = (m * 3 * self.total_channels) + (active_reference*3)
                 sample = bytearray(1)
                 sample.append(data[ref_offset])
                 sample.append(data[ref_offset+1])
@@ -311,7 +352,7 @@ class GraphWindow(QtWidgets.QWidget):
                     # Samples are sent in bulk of size SAMPLES, interleaved such that
                     # the first sample of each channel is sent, then the second sample,
                     # and so on.
-                    offset = (m * 3 * total_channels) + (n*3)
+                    offset = (m * 3 * self.total_channels) + (n*3)
                     # The 3 bytes of each sample arrive in reverse order (little endian).
                     # We convert them to a 32bit integer by appending the bytes together,
                     # and adding a zero byte as LSB.
@@ -320,17 +361,25 @@ class GraphWindow(QtWidgets.QWidget):
                     sample.append(data[offset+1])
                     sample.append(data[offset+2])
                     value = int.from_bytes(sample, byteorder='little', signed=True)
+                    welch_buffer.append(value)
+                    
                     # # Send sample to plot
-                    data_connectors[n].cb_append_data_point((value - ref_value)*gain, x)
+                    if self.welch_enabled:
+                        if len(welch_buffer) == welch_buffer.maxlen:
+                            f, pxx = signal.welch(x=welch_buffer, fs=self.fs)
+                            self.data_connectors[n].cb_set_data(pxx, f)
+                    else:
+                        self.data_connectors[n].cb_append_data_point((value - ref_value)*gain, x)
 
                 if not self.is_capturing:
                     return
                 x += 1
                 if DEBUG:
-                    sleep(0.05)
+                    sleep(0.01)
 
-    #def filter_data(self, data):
-
+    def fft_data(self, data):
+        f, pxx = signal.welch(x=data, fs=self.fs)
+        self.data_connectors[33].cb_set_data(pxx, f)
 
     def setIP(self, ip):
         self.ip = ip
