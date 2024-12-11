@@ -44,6 +44,7 @@ class MainWindow(QtWidgets.QMainWindow):
                            "QScrollBar:vertical { background: #CFD8DC }"
                            "QSpinBox { background: #CFD8DC }"
                            "QListView::item:selected { background: #546E7A }"
+                           "QListView::item:selected:!active { }"
                            "QPushButton { background: #CFD8DC }")
         # Initialize main window
         self.setWindowTitle("Biosemi TCP Reader")
@@ -53,6 +54,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Initialize selection window and graph display window
         selection_window = SelectionWindow(self.electrodes_model)
+        selection_window.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Preferred)
         graph_window = GraphWindow(self.electrodes_model)
 
         # Add to layout and attach to main window
@@ -132,8 +134,9 @@ class SelectionWindow(QtWidgets.QWidget):
         channel_layout = QtWidgets.QVBoxLayout()
         channel_layout.addWidget(QtWidgets.QLabel("Active Channels"))
         self.channel_selector = QtWidgets.QListView()
+        self.channel_selector.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.channel_selector.setModel(electrodes_model[0])
-        self.channel_selector.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.channel_selector.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
         channel_layout.addWidget(self.channel_selector)
         channel_frame.setLayout(channel_layout)
         selection_layout.addWidget(channel_frame)
@@ -148,7 +151,8 @@ class SelectionWindow(QtWidgets.QWidget):
         reference_layout = QtWidgets.QVBoxLayout()
 
         reference_layout.addWidget(QtWidgets.QLabel("Reference Channel"))
-        self.reference_selector = QtWidgets.QListView()
+        self.reference_selector = SingleSelectQListView()
+        self.reference_selector.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.reference_selector.setModel(electrodes_model[0])
         self.reference_selector.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         reference_layout.addWidget(self.reference_selector)
@@ -333,6 +337,19 @@ class GraphWindow(QtWidgets.QWidget):
     
     def setPort(self, port):
         self.port = int(port)
+
+class SingleSelectQListView(QtWidgets.QListView):
+    def __init__(self):
+        super().__init__()
+    
+    def mousePressEvent(self, event):
+        if self.indexAt(event.pos()) in self.selectedIndexes():
+            self.clearSelection()
+        else:
+            super(SingleSelectQListView, self).mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        self.mousePressEvent(event)
 
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()
