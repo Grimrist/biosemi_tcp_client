@@ -13,9 +13,11 @@ from pglive.sources.live_plot import LiveLinePlot
 from pglive.sources.live_plot_widget import LivePlotWidget
 from pglive.sources.live_axis_range import LiveAxisRange
 
+DEBUG = True
+
 # TCP/IP setup
-TCP_IP = '10.31.124.149' # ActiView is running on the same PC
-TCP_PORT = 3580       # This is the port ActiView listens on
+TCP_IP = '127.0.0.1' # ActiView is running on the same PC
+TCP_PORT = 8888 # This is the port ActiView listens on
 CHANNELS = 32 # Amount of channels sent via TCP
 SAMPLES = 64 # Samples per channel
 EX_NODES = 8 # EX electrodes
@@ -49,7 +51,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.main_layout.addWidget(self.graph_window)
         self.main_widget.setLayout(self.main_layout)
 
-        # Connect events
+        ## Connect events
+        # Connection settings
+        self.selection_window.ip_box.textChanged.connect(self.graph_window.setIP)
+        self.selection_window.port_box.textChanged.connect(self.graph_window.setPort)
+
+        # Graph control
         self.selection_window.channel_selector.selectionModel().selectionChanged.connect(self.graph_window.setActiveChannels)
         self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
         self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
@@ -91,14 +98,30 @@ class SelectionWindow(QtWidgets.QWidget):
         super().__init__()
 
         self.selection_layout = QtWidgets.QVBoxLayout()
+
+        # Connection settings
+        self.connection_settings = QtWidgets.QFrame()
+        connection_layout = QtWidgets.QFormLayout()
+        self.ip_box = QtWidgets.QLineEdit()
+        self.ip_box.setText(TCP_IP)
+        self.port_box = QtWidgets.QLineEdit()
+        self.port_box.setText(str(TCP_PORT))
+        connection_layout.addRow(QtWidgets.QLabel("IP"), self.ip_box)
+        connection_layout.addRow(QtWidgets.QLabel("Port"), self.port_box)
+        self.selection_layout.addWidget(self.connection_settings)
+        self.connection_settings.setLayout(connection_layout)
+
+        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        self.selection_layout.addItem(verticalSpacer) 
+        
         # Channel selection
         self.channel_selector = QtWidgets.QListView()
         self.channel_selector.setModel(electrodes_model[0])
         self.channel_selector.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.selection_layout.addWidget(self.channel_selector)
 
-        self.verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
-        self.selection_layout.addItem(self.verticalSpacer) 
+        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        self.selection_layout.addItem(verticalSpacer) 
 
         # Control buttons
         self.button_widget = QtWidgets.QWidget()
@@ -115,6 +138,8 @@ class SelectionWindow(QtWidgets.QWidget):
 class GraphWindow(QtWidgets.QWidget):
     def __init__(self, electrodes_model):
         super().__init__()
+        self.ip = TCP_IP
+        self.port = TCP_PORT
         self.is_capturing = False
         self.electrodes_model = electrodes_model
         self.graph_layout = QtWidgets.QVBoxLayout()
@@ -143,8 +168,9 @@ class GraphWindow(QtWidgets.QWidget):
     def startCapture(self):
         if self.is_capturing:
             self.stopCapture()
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((TCP_IP, TCP_PORT))
+        if not DEBUG:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect((self.ip, self.port))
         self.data_connectors = []
         self.plots = []
         for i in range(32):
@@ -155,7 +181,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.is_capturing = True
         self.data_thread = Thread(target=self.readData, args=(self.electrodes_model, self.data_connectors))
         self.data_thread.start()
-
+        print("Reading from ip %s and port %s" % (self.ip, self.port))
     def stopCapture(self):
         if not self.is_capturing:
             return
@@ -165,10 +191,11 @@ class GraphWindow(QtWidgets.QWidget):
         for connector in self.data_connectors:
             connector.deleteLater()
         self.plot_widget.deleteLater()
-        self.plot_widget = LivePlotWidget(title="Line Plot @ 100Hz")
+        self.plot_widget = LivePlotWidget(title="EEG Channels @ 30Hz")
         self.graph_layout.addWidget(self.plot_widget)
         self.data_thread.join()
-        self.sock.close()        
+        if not DEBUG:
+            self.sock.close()        
 
     def readData(self, electrodes_model, data_connectors):
         x = 0
@@ -182,25 +209,28 @@ class GraphWindow(QtWidgets.QWidget):
             if model.itemFromIndex(idx).data():
                 active_channels.append(i)
         while True:
-            # Read the next packet from the network
-            data = self.sock.recv(BUFFER_SIZE)
+            if not DEBUG:
+                # Read the next packet from the network
+                data = self.sock.recv(BUFFER_SIZE)
             # Extract all channel samples from the packet
             for m in range(total_data):
                 for n in active_channels:
-                    # rng = numpy.random.default_rng()
-                    # value = rng.random()
-                    # Samples are sent in bulk of size SAMPLES, interleaved such that
-                    # the first sample of each channel is sent, then the second sample,
-                    # and so on.
-                    offset = (m * 3 * total_data) + (n*3)
-                    # The 3 bytes of each sample arrive in reverse order (little endian).
-                    # We convert them to a 32bit integer by appending the bytes together,
-                    # and adding a zero byte as LSB.
-                    sample = bytearray(1)
-                    sample.append(data[offset])
-                    sample.append(data[offset+1])
-                    sample.append(data[offset+2])
-                    value = int.from_bytes(sample, byteorder='little', signed=True)
+                    if DEBUG:
+                        rng = numpy.random.default_rng()
+                        value = rng.random()
+                    else:
+                        # Samples are sent in bulk of size SAMPLES, interleaved such that
+                        # the first sample of each channel is sent, then the second sample,
+                        # and so on.
+                        offset = (m * 3 * total_data) + (n*3)
+                        # The 3 bytes of each sample arrive in reverse order (little endian).
+                        # We convert them to a 32bit integer by appending the bytes together,
+                        # and adding a zero byte as LSB.
+                        sample = bytearray(1)
+                        sample.append(data[offset])
+                        sample.append(data[offset+1])
+                        sample.append(data[offset+2])
+                        value = int.from_bytes(sample, byteorder='little', signed=True)
 
                     # # Send sample to plot
                     data_connectors[n].cb_append_data_point(value*gain, x)
@@ -209,7 +239,11 @@ class GraphWindow(QtWidgets.QWidget):
                 x += 1
                 sleep(0.05)
             
-
+    def setIP(self, ip):
+        self.ip = ip
+    
+    def setPort(self, port):
+        self.port = int(port)
 
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()
