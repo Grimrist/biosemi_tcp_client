@@ -6,7 +6,7 @@ from threading import Thread
 from time import sleep
 
 from PyQt6 import QtWidgets, QtCore, QtGui
-
+from scipy import signal # Filtering
 import pyqtgraph
 from pglive.sources.data_connector import DataConnector
 from pglive.sources.live_plot import LiveLinePlot
@@ -38,35 +38,37 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Initialize main window
         self.setWindowTitle("Biosemi TCP Reader")
-        self.main_widget = QtWidgets.QWidget()
-        self.main_layout = QtWidgets.QHBoxLayout()
+        main_widget = QtWidgets.QWidget()
+        main_layout = QtWidgets.QHBoxLayout()
         self.initialize_models()
 
         # Initialize selection window and graph display window
-        self.selection_window = SelectionWindow(self.electrodes_model)
-        self.graph_window = GraphWindow(self.electrodes_model)
+        selection_window = SelectionWindow(self.electrodes_model)
+        graph_window = GraphWindow(self.electrodes_model)
 
         # Add to layout and attach to main window
-        self.main_layout.addWidget(self.selection_window)
-        self.main_layout.addWidget(self.graph_window)
-        self.main_widget.setLayout(self.main_layout)
+        main_layout.addWidget(selection_window)
+        main_layout.addWidget(graph_window)
+        main_widget.setLayout(main_layout)
 
         ## Connect events
         # Connection settings
-        self.selection_window.ip_box.textChanged.connect(self.graph_window.setIP)
-        self.selection_window.port_box.textChanged.connect(self.graph_window.setPort)
+        selection_window.ip_box.textChanged.connect(graph_window.setIP)
+        selection_window.port_box.textChanged.connect(graph_window.setPort)
 
         # Graph control
-        self.selection_window.channel_selector.selectionModel().selectionChanged.connect(self.graph_window.setActiveChannels)
-        self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
-        self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
+        selection_window.channel_selector.selectionModel().selectionChanged.connect(graph_window.setActiveChannels)
+        selection_window.reference_selector.selectionModel().selectionChanged.connect(graph_window.setReference)
+
+        selection_window.start_button.clicked.connect(graph_window.startCapture)
+        selection_window.stop_button.clicked.connect(graph_window.stopCapture)
         # Show window
-        self.setCentralWidget(self.main_widget)
+        self.setCentralWidget(main_widget)
         self.show()
 
     def initialize_models(self):
         # Initialize 32 A Electrodes
-        electrodesA = QtGui.QStandardItemModel(32,2)
+        electrodesA = QtGui.QStandardItemModel(32,3)
         for i in range(32):
             name = QtGui.QStandardItem("A" + str(i+1))
             electrodesA.setItem(i,0,name)
@@ -75,7 +77,7 @@ class MainWindow(QtWidgets.QMainWindow):
             electrodesA.setItem(i,1,status)
 
         # Initialize 32 B Electrodes
-        electrodesB = QtGui.QStandardItemModel(32,2)
+        electrodesB = QtGui.QStandardItemModel(32,3)
         for i in range(32):
             name = QtGui.QStandardItem("B" + str(i+1))
             electrodesB.setItem(i,0,name)
@@ -84,7 +86,7 @@ class MainWindow(QtWidgets.QMainWindow):
             electrodesB.setItem(i,1,status)
 
         # Initialize 8 EX Electrodes
-        electrodesEX = QtGui.QStandardItemModel(8,2)
+        electrodesEX = QtGui.QStandardItemModel(8,3)
         for i in range(8):
             name = QtGui.QStandardItem("EX" + str(i+1))
             electrodesEX.setItem(i,0,name)
@@ -97,10 +99,10 @@ class SelectionWindow(QtWidgets.QWidget):
     def __init__(self, electrodes_model):
         super().__init__()
 
-        self.selection_layout = QtWidgets.QVBoxLayout()
+        selection_layout = QtWidgets.QVBoxLayout()
 
         # Connection settings
-        self.connection_settings = QtWidgets.QFrame()
+        connection_settings = QtWidgets.QFrame()
         connection_layout = QtWidgets.QFormLayout()
         self.ip_box = QtWidgets.QLineEdit()
         self.ip_box.setText(TCP_IP)
@@ -108,32 +110,68 @@ class SelectionWindow(QtWidgets.QWidget):
         self.port_box.setText(str(TCP_PORT))
         connection_layout.addRow(QtWidgets.QLabel("IP"), self.ip_box)
         connection_layout.addRow(QtWidgets.QLabel("Port"), self.port_box)
-        self.selection_layout.addWidget(self.connection_settings)
-        self.connection_settings.setLayout(connection_layout)
+        selection_layout.addWidget(connection_settings)
+        connection_settings.setLayout(connection_layout)
 
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
-        self.selection_layout.addItem(verticalSpacer) 
+        selection_layout.addItem(verticalSpacer) 
         
         # Channel selection
+        channel_frame = QtWidgets.QFrame()
+        channel_layout = QtWidgets.QVBoxLayout()
+        channel_layout.addWidget(QtWidgets.QLabel("Active Channels"))
         self.channel_selector = QtWidgets.QListView()
         self.channel_selector.setModel(electrodes_model[0])
         self.channel_selector.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.selection_layout.addWidget(self.channel_selector)
+        channel_layout.addWidget(self.channel_selector)
+        channel_frame.setLayout(channel_layout)
+        selection_layout.addWidget(channel_frame)
 
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
-        self.selection_layout.addItem(verticalSpacer) 
+        selection_layout.addItem(verticalSpacer) 
+
+        # Reference selection
+        reference_frame = QtWidgets.QFrame()
+        reference_layout = QtWidgets.QVBoxLayout()
+
+        reference_layout.addWidget(QtWidgets.QLabel("Reference Channel"))
+        self.reference_selector = QtWidgets.QListView()
+        self.reference_selector.setModel(electrodes_model[0])
+        self.reference_selector.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        reference_layout.addWidget(self.reference_selector)
+        reference_frame.setLayout(reference_layout)
+        selection_layout.addWidget(reference_frame)
+
+        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        selection_layout.addItem(verticalSpacer) 
+
+        # Filter settings (FIR)
+        filter_settings = QtWidgets.QFrame()
+        filter_layout = QtWidgets.QFormLayout()
+        self.lowpass_box = QtWidgets.QLineEdit()
+        self.lowpass_box.setText("1")
+        self.highpass_box = QtWidgets.QLineEdit()
+        self.highpass_box.setText("1")
+        filter_layout.addRow(QtWidgets.QLabel("Low pass FIR Filter Cut-off [Hz]"), self.lowpass_box)
+        filter_layout.addRow(QtWidgets.QLabel("High pass FIR Filter Cut-off [Hz]"), self.highpass_box)
+        selection_layout.addWidget(filter_settings)
+        filter_settings.setLayout(filter_layout)
+
+        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        selection_layout.addItem(verticalSpacer) 
+
 
         # Control buttons
-        self.button_widget = QtWidgets.QWidget()
-        self.button_layout = QtWidgets.QHBoxLayout()
+        button_widget = QtWidgets.QWidget()
+        button_layout = QtWidgets.QHBoxLayout()
         self.start_button = QtWidgets.QPushButton("Start")
         self.stop_button = QtWidgets.QPushButton("Stop")
-        self.button_layout.addWidget(self.start_button)
-        self.button_layout.addWidget(self.stop_button)
-        self.button_widget.setLayout(self.button_layout)
-        self.selection_layout.addWidget(self.button_widget)
+        button_layout.addWidget(self.start_button)
+        button_layout.addWidget(self.stop_button)
+        button_widget.setLayout(button_layout)
+        selection_layout.addWidget(button_widget)
 
-        self.setLayout(self.selection_layout)
+        self.setLayout(selection_layout)
 
 class GraphWindow(QtWidgets.QWidget):
     def __init__(self, electrodes_model):
@@ -155,13 +193,14 @@ class GraphWindow(QtWidgets.QWidget):
         
         for i in selection.indexes():
             self.electrodes_model[0].itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(True))
-            
-        # print("Stored bools")
-        # for i in range(self.electrodes_model[0].rowCount()):
-        #     idx = self.electrodes_model[0].index(i, 1)
-            
-        #     print(self.electrodes_model[0].itemFromIndex(idx).data())
-        # print("======")
+
+    def setReference(self, selection):
+        for i in range(self.electrodes_model[0].rowCount()):
+            idx = self.electrodes_model[0].index(i, 2)
+            self.electrodes_model[0].itemFromIndex(idx).setData(QtCore.QVariant(False))
+        
+        for i in selection.indexes():
+            self.electrodes_model[0].itemFromIndex(i.siblingAtColumn(2)).setData(QtCore.QVariant(True))
 
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
@@ -197,47 +236,72 @@ class GraphWindow(QtWidgets.QWidget):
         if not DEBUG:
             self.sock.close()        
 
+
+    ##  TCP packet format (2 channels example). Each sample is 24-bits, little-endian.
+    ##  To convert to a 32-bit integer, we add a 0-byte to the LSB before converting to big-endian.
+    ##  ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗
+    ##  ║ C1S1 ║║ C1S1 ║║ C1S1 ║ ║ C2S1 ║║ C2S1 ║║ C2S1 ║ ║ C1S2 ║║ C1S2 ║║ C1S2 ║ ║ C2S2 ║║ C2S2 ║║ C2S2 ║
+    ##  ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║
+    ##  ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝
+    ##  
+    ##  
     def readData(self, electrodes_model, data_connectors):
         x = 0
         # Apply gain based on physical max/min and digital max/min
         gain = (PHYS_MAX - PHYS_MIN)/(DIGI_MAX - DIGI_MIN)
-        total_data = CHANNELS+EX_NODES
+        total_channels = (CHANNELS+EX_NODES)
         active_channels = []
+        active_reference = -1
         model = electrodes_model[0]
+
         for i in range(model.rowCount()):
+            # Select active channels
             idx = model.index(i,1)
             if model.itemFromIndex(idx).data():
                 active_channels.append(i)
+            # Select reference point
+            idx = model.index(i,2)
+            if model.itemFromIndex(idx).data():
+                active_reference = i
+
         while True:
-            if not DEBUG:
+            if DEBUG:
+                rng = numpy.random.default_rng()
+                data = rng.bytes(BUFFER_SIZE)
+            else:
                 # Read the next packet from the network
                 data = self.sock.recv(BUFFER_SIZE)
-            # Extract all channel samples from the packet
-            for m in range(total_data):
-                for n in active_channels:
-                    if DEBUG:
-                        rng = numpy.random.default_rng()
-                        value = rng.random()
-                    else:
-                        # Samples are sent in bulk of size SAMPLES, interleaved such that
-                        # the first sample of each channel is sent, then the second sample,
-                        # and so on.
-                        offset = (m * 3 * total_data) + (n*3)
-                        # The 3 bytes of each sample arrive in reverse order (little endian).
-                        # We convert them to a 32bit integer by appending the bytes together,
-                        # and adding a zero byte as LSB.
-                        sample = bytearray(1)
-                        sample.append(data[offset])
-                        sample.append(data[offset+1])
-                        sample.append(data[offset+2])
-                        value = int.from_bytes(sample, byteorder='little', signed=True)
 
+            # Extract all channel samples from the packet
+            for m in range(SAMPLES):
+                # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
+                ref_offset = (m * 3 * total_channels) + (active_reference*3)
+                sample = bytearray(1)
+                sample.append(data[ref_offset])
+                sample.append(data[ref_offset+1])
+                sample.append(data[ref_offset+2])
+                ref_value = int.from_bytes(sample, byteorder='little', signed=True)
+                for n in active_channels:
+                    # Samples are sent in bulk of size SAMPLES, interleaved such that
+                    # the first sample of each channel is sent, then the second sample,
+                    # and so on.
+                    offset = (m * 3 * total_channels) + (n*3)
+                    # The 3 bytes of each sample arrive in reverse order (little endian).
+                    # We convert them to a 32bit integer by appending the bytes together,
+                    # and adding a zero byte as LSB.
+                    sample = bytearray(1)
+                    sample.append(data[offset])
+                    sample.append(data[offset+1])
+                    sample.append(data[offset+2])
+                    value = int.from_bytes(sample, byteorder='little', signed=True)
                     # # Send sample to plot
-                    data_connectors[n].cb_append_data_point(value*gain, x)
+                    data_connectors[n].cb_append_data_point((value - ref_value)*gain, x)
+
                 if not self.is_capturing:
                     return
                 x += 1
-                sleep(0.05)
+                if DEBUG:
+                    sleep(0.05)
             
     def setIP(self, ip):
         self.ip = ip
