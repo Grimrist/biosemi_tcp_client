@@ -35,7 +35,16 @@ ACTIVE_CHANNEL = 1 # Channel being measured
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-
+        self.setStyleSheet("QMainWindow { background-color: #263238; color: #ffffff }"
+                           "QFrame { background-color: #37474F; color: #ffffff }"
+                           "QCheckBox { color: #ffffff }"
+                           "QCheckBox::indicator::unchecked { background-color: #CFD8DC }"
+                           "QCheckBox::indicator::checked { background-color: #B0BEC5; border-image: url(./check.svg)}"
+                           "QLineEdit { background-color: #CFD8DC }"
+                           "QScrollBar:vertical { background: #CFD8DC }"
+                           "QSpinBox { background: #CFD8DC }"
+                           "QListView::item:selected { background: #546E7A }"
+                           "QPushButton { background: #CFD8DC }")
         # Initialize main window
         self.setWindowTitle("Biosemi TCP Reader")
         main_widget = QtWidgets.QWidget()
@@ -102,7 +111,8 @@ class SelectionWindow(QtWidgets.QWidget):
         selection_layout = QtWidgets.QVBoxLayout()
 
         # Connection settings
-        connection_settings = QtWidgets.QFrame()
+        connection_frame = QtWidgets.QFrame()
+        connection_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
         connection_layout = QtWidgets.QFormLayout()
         self.ip_box = QtWidgets.QLineEdit()
         self.ip_box.setText(TCP_IP)
@@ -110,14 +120,15 @@ class SelectionWindow(QtWidgets.QWidget):
         self.port_box.setText(str(TCP_PORT))
         connection_layout.addRow(QtWidgets.QLabel("IP"), self.ip_box)
         connection_layout.addRow(QtWidgets.QLabel("Port"), self.port_box)
-        selection_layout.addWidget(connection_settings)
-        connection_settings.setLayout(connection_layout)
+        selection_layout.addWidget(connection_frame)
+        connection_frame.setLayout(connection_layout)
 
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         selection_layout.addItem(verticalSpacer) 
         
         # Channel selection
         channel_frame = QtWidgets.QFrame()
+        channel_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
         channel_layout = QtWidgets.QVBoxLayout()
         channel_layout.addWidget(QtWidgets.QLabel("Active Channels"))
         self.channel_selector = QtWidgets.QListView()
@@ -132,6 +143,8 @@ class SelectionWindow(QtWidgets.QWidget):
 
         # Reference selection
         reference_frame = QtWidgets.QFrame()
+        reference_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
+
         reference_layout = QtWidgets.QVBoxLayout()
 
         reference_layout.addWidget(QtWidgets.QLabel("Reference Channel"))
@@ -146,16 +159,25 @@ class SelectionWindow(QtWidgets.QWidget):
         selection_layout.addItem(verticalSpacer) 
 
         # Filter settings (FIR)
-        filter_settings = QtWidgets.QFrame()
-        filter_layout = QtWidgets.QFormLayout()
-        self.lowpass_box = QtWidgets.QLineEdit()
-        self.lowpass_box.setText("1")
-        self.highpass_box = QtWidgets.QLineEdit()
-        self.highpass_box.setText("1")
-        filter_layout.addRow(QtWidgets.QLabel("Low pass FIR Filter Cut-off [Hz]"), self.lowpass_box)
-        filter_layout.addRow(QtWidgets.QLabel("High pass FIR Filter Cut-off [Hz]"), self.highpass_box)
-        selection_layout.addWidget(filter_settings)
-        filter_settings.setLayout(filter_layout)
+        filter_frame = QtWidgets.QFrame()
+        filter_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
+        filter_layout = QtWidgets.QVBoxLayout()
+        self.filter_checkbox = QtWidgets.QCheckBox("Filtering")
+        filter_layout.addWidget(self.filter_checkbox)
+
+        filter_settings = QtWidgets.QWidget()
+        filter_settings_layout = QtWidgets.QFormLayout()
+        self.lowpass_box = QtWidgets.QSpinBox()
+        self.lowpass_box.setValue(1)
+        self.highpass_box = QtWidgets.QSpinBox()
+        self.highpass_box.setValue(1)
+        filter_settings_layout.addRow(QtWidgets.QLabel("Low pass FIR Filter Cut-off [Hz]"), self.lowpass_box)
+        filter_settings_layout.addRow(QtWidgets.QLabel("High pass FIR Filter Cut-off [Hz]"), self.highpass_box)
+        filter_layout.addWidget(filter_settings)
+
+        filter_settings.setLayout(filter_settings_layout)
+        filter_frame.setLayout(filter_layout)
+        selection_layout.addWidget(filter_frame)
 
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         selection_layout.addItem(verticalSpacer) 
@@ -182,7 +204,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.electrodes_model = electrodes_model
         self.graph_layout = QtWidgets.QVBoxLayout()
         # , y_range_controller=LiveAxisRange(fixed_range=[-100, 100])
-        self.plot_widget = LivePlotWidget(title="Line Plot @ 100Hz")
+        self.plot_widget = LivePlotWidget(title="EEG Channels @ 30Hz")
         self.graph_layout.addWidget(self.plot_widget)
         self.setLayout(self.graph_layout)
         
@@ -302,7 +324,10 @@ class GraphWindow(QtWidgets.QWidget):
                 x += 1
                 if DEBUG:
                     sleep(0.05)
-            
+
+    #def filter_data(self, data):
+
+
     def setIP(self, ip):
         self.ip = ip
     
