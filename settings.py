@@ -1,7 +1,7 @@
 ## Load settings from JSON file
 
 import json
-
+from PyQt6.QtCore import Qt
 # SettingsHandler serves as the interface through which other modules
 # can update the global settings variable, which serves as an unique source 
 # of truth across the program. It also initializes the settings off of a local settings file.
@@ -62,7 +62,10 @@ class SettingsHandler():
         self.settings['biosemi']['buffer_size'] = int(buffer_size)
     
     def setWelchEnabled(self, enable):
-        self.settings['fft']['welch_enabled'] = bool(enable)
+        if(enable == Qt.CheckState.Checked):
+            self.settings['fft']['welch_enabled'] = True
+        else:
+            self.settings['fft']['welch_enabled'] = False
 
     def setWelchWindow(self, window):
         self.settings['fft']['welch_window'] = int(window)

@@ -1,5 +1,4 @@
-- Use better data sharing model between widgets
-- Implement Welsh FFT properly (allow channel selection)
 - Handle errors due to dropped packets/data loss
 - Determine ADC range to properly display uV values
 - Try detecting fft amplitude values
+- Fix program not properly closing when exited while thread is active

@@ -167,6 +167,7 @@ class SelectionWindow(QtWidgets.QWidget):
         fft_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
         fft_layout = QtWidgets.QVBoxLayout()
         self.fft_checkbox = QtWidgets.QCheckBox("FFT")
+        self.fft_checkbox.setChecked(self.settings['fft']['welch_enabled'])
         fft_layout.addWidget(self.fft_checkbox)
 
         fft_settings = QtWidgets.QWidget()
@@ -258,12 +259,13 @@ class GraphWindow(QtWidgets.QWidget):
         fs = self.settings['biosemi']['fs']
         self.data_connectors = []
         self.plots = []
+        # Generate plots for time-domain graphing
         for i in range(total_channels-1):
             plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels-1), 0.8, 0.9))
             self.data_connectors.append(DataConnector(plot, max_points=fs*10, plot_rate=30))
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
-        #for FFT
+        # Generate plots for FFT graphing. No maximum points because we just set the data directly
         for i in range(total_channels-1):
             plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels-1), 0.8, 0.9))
             self.data_connectors.append(DataConnector(plot, plot_rate=30))
@@ -280,15 +282,17 @@ class GraphWindow(QtWidgets.QWidget):
         if not self.is_capturing:
             return
         self.is_capturing = False
-        for plot in self.plots:
-            plot.deleteLater()
+        self.data_thread.join()
         for connector in self.data_connectors:
             connector.deleteLater()
+        ## This was causing errors when stopping before FFT deque was full
+        ## Possibly because none of the connectors have received data yet?
+        # for plot in self.plots:
+        #     plot.deleteLater()
         self.plot_widget.deleteLater()
         self.plot_widget = LivePlotWidget(title="EEG Channels @ 30Hz")
         self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.graph_layout.addWidget(self.plot_widget)
-        self.data_thread.join()
         if not DEBUG:
             self.sock.close()        
 
@@ -312,7 +316,12 @@ class GraphWindow(QtWidgets.QWidget):
         active_channels = []
         active_reference = -1
         welch_enabled = self.settings['fft']['welch_enabled']
-        welch_buffer = deque(maxlen=self.settings['fft']['welch_window'])
+        welch_buffers = []
+        # Generate our buffers for FFT
+        # We could skip this if FFT is not enabled, but I don't think it 
+        # slows down regular time graphing too much
+        for i in range(total_channels):
+            welch_buffers.append(deque(maxlen=self.settings['fft']['welch_window']))
         buffer_size = total_channels * self.settings['biosemi']['samples'] * 3
         for i in range(total_channels):
             # Select active channels
@@ -354,13 +363,13 @@ class GraphWindow(QtWidgets.QWidget):
                     sample.append(data[offset+1])
                     sample.append(data[offset+2])
                     value = int.from_bytes(sample, byteorder='little', signed=True)
-                    welch_buffer.append(value)
+                    welch_buffers[n].append(value)
                     
                     # # Send sample to plot
                     if welch_enabled:
-                        if len(welch_buffer) == welch_buffer.maxlen:
-                            f, pxx = signal.welch(x=welch_buffer, fs=fs)
-                            self.data_connectors[n].cb_set_data(pxx, f)
+                        if len(welch_buffers[n]) == welch_buffers[n].maxlen:
+                            f, pxx = signal.welch(x=welch_buffers[n], fs=fs)
+                            self.data_connectors[n + (total_channels-1)].cb_set_data(pxx, f)
                     else:
                         self.data_connectors[n].cb_append_data_point((value - ref_value)*gain, x)
 
@@ -371,8 +380,7 @@ class GraphWindow(QtWidgets.QWidget):
                     sleep(0.01)
 
     def fft_data(self, data, fs):
-        f, pxx = signal.welch(x=data, fs=fs)
-        self.data_connectors[33].cb_set_data(pxx, f)
+        return signal.welch(x=data, fs=fs, nperseg=fs)
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):

@@ -1,1 +1,0 @@
-{"socket": {"ip": "127.0.0.1", "port": 8888}, "biosemi": {"phys_max": 262143, "phys_min": -262144, "digi_max": 8388607, "digi_min": -8388608, "fs": 16000, "channels": [["A", 32], ["B", 32], ["EX", 8]], "samples": 64, "buffer_size": 0}, "fft": {"welch_enabled": false, "welch_window": 1024}}
