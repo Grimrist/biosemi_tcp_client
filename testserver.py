@@ -1,6 +1,6 @@
 import numpy
 import socket   # used for TCP/IP communication
-
+from settings import SettingsHandler
 import sys
 from threading import Thread
 from time import sleep
@@ -15,17 +15,6 @@ from pglive.sources.live_axis_range import LiveAxisRange
 
 DEBUG = True
 
-# TCP/IP setup
-TCP_IP = '127.0.0.1' # ActiView is running on the same PC
-TCP_PORT = 8888 # This is the port ActiView listens on
-CHANNELS = 32 # Amount of channels sent via TCP
-SAMPLES = 64 # Samples per channel
-EX_NODES = 8 # EX electrodes
-BUFFER_SIZE = (CHANNELS+EX_NODES) * SAMPLES * 3 # Data packet size 
-PHYS_MAX = 262143 # Physical maximum value 
-PHYS_MIN = -262144 # Physical minimum value
-DIGI_MAX = 8388607 # Digital maximum value
-DIGI_MIN = -8388608 # Digital minimum value
 ACTIVE_CHANNEL = 1 # Channel being measured
 
 # Open socket
@@ -46,6 +35,11 @@ class MainWindow(QtWidgets.QMainWindow):
                            "QListView::item:selected { background: #546E7A }"
                            "QListView::item:selected:!active { }"
                            "QPushButton { background: #CFD8DC }")
+
+        # Load settings
+        self.settings = {}
+        self.settingsHandler = SettingsHandler("settings.json", self.settings)
+
         # Initialize main window
         self.setWindowTitle("Biosemi TCP Reader")
         main_widget = QtWidgets.QWidget()
@@ -53,9 +47,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.initialize_models()
 
         # Initialize selection window and graph display window
-        selection_window = SelectionWindow(self.electrodes_model)
+        selection_window = SelectionWindow(self.settings, self.electrodes_model)
         selection_window.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Preferred)
-        graph_window = GraphWindow(self.electrodes_model)
+        graph_window = GraphWindow(self.settings, self.electrodes_model)
 
         # Add to layout and attach to main window
         main_layout.addWidget(selection_window)
@@ -64,10 +58,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         ### Signal connections
         # Connection settings
-        selection_window.ip_box.textChanged.connect(graph_window.setIP)
-        selection_window.port_box.textChanged.connect(graph_window.setPort)
-        selection_window.samples_box.textChanged.connect(graph_window.setSamples)
-        selection_window.fs_box.textChanged.connect(graph_window.setSamplingRate)
+        selection_window.ip_box.textChanged.connect(self.settingsHandler.setIp)
+        selection_window.port_box.textChanged.connect(self.settingsHandler.setPort)
+        selection_window.samples_box.textChanged.connect(self.settingsHandler.setSamples)
+        selection_window.fs_box.textChanged.connect(self.settingsHandler.setFs)
         selection_window.channels_box.textChanged.connect(graph_window.setTotalChannels)
 
         # Graph control
@@ -78,8 +72,8 @@ class MainWindow(QtWidgets.QMainWindow):
         selection_window.stop_button.clicked.connect(graph_window.stopCapture)
 
         # FFT settings
-        selection_window.welch_window_box.valueChanged.connect(graph_window.setWelchWindow)
-
+        selection_window.welch_window_box.valueChanged.connect(self.settingsHandler.setWelchWindow)
+        selection_window.fft_checkbox.checkStateChanged.connect(self.settingsHandler.setWelchEnabled)
         ###
 
         # Show window
@@ -87,38 +81,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show()
 
     def initialize_models(self):
-        # Initialize 32 A Electrodes
-        electrodesA = QtGui.QStandardItemModel(32,3)
-        for i in range(32):
-            name = QtGui.QStandardItem("A" + str(i+1))
-            electrodesA.setItem(i,0,name)
-            status = QtGui.QStandardItem()
-            status.setData(QtCore.QVariant(False))
-            electrodesA.setItem(i,1,status)
-
-        # Initialize 32 B Electrodes
-        electrodesB = QtGui.QStandardItemModel(32,3)
-        for i in range(32):
-            name = QtGui.QStandardItem("B" + str(i+1))
-            electrodesB.setItem(i,0,name)
-            status = QtGui.QStandardItem()
-            status.setData(QtCore.QVariant(False))
-            electrodesB.setItem(i,1,status)
-
-        # Initialize 8 EX Electrodes
-        electrodesEX = QtGui.QStandardItemModel(8,3)
-        for i in range(8):
-            name = QtGui.QStandardItem("EX" + str(i+1))
-            electrodesEX.setItem(i,0,name)
-            status = QtGui.QStandardItem()
-            status.setData(QtCore.QVariant(False))
-            electrodesEX.setItem(i,1,status)
-        self.electrodes_model = [electrodesA, electrodesB, electrodesEX]
+        self.electrodes_model = None
+        electrodes = QtGui.QStandardItemModel()
+        for (group, number) in self.settings['biosemi']['channels']:
+            for i in range(number):
+                name = QtGui.QStandardItem(group + str(i+1))
+                view_status = QtGui.QStandardItem()
+                view_status.setData(QtCore.QVariant(False))
+                ref_status = QtGui.QStandardItem()
+                ref_status.setData(QtCore.QVariant(False))
+                electrodes.appendRow([name, view_status, ref_status])
+        self.electrodes_model = electrodes
 
 class SelectionWindow(QtWidgets.QWidget):
-    def __init__(self, electrodes_model):
+    def __init__(self, settings, electrodes_model):
         super().__init__()
-
+        self.settings = settings
+        self.electrodes_model = electrodes_model
         selection_layout = QtWidgets.QVBoxLayout()
 
         # Connection settings
@@ -126,13 +105,13 @@ class SelectionWindow(QtWidgets.QWidget):
         connection_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
         connection_layout = QtWidgets.QFormLayout()
         self.ip_box = QtWidgets.QLineEdit()
-        self.ip_box.setText(TCP_IP)
+        self.ip_box.setText(self.settings['socket']['ip'])
         self.port_box = QtWidgets.QLineEdit()
-        self.port_box.setText(str(TCP_PORT))
+        self.port_box.setText(str(self.settings['socket']['port']))
         self.channels_box = QtWidgets.QLineEdit()
-        self.channels_box.setText(str(CHANNELS + EX_NODES))
+        self.channels_box.setText(str(64 + 8))
         self.samples_box = QtWidgets.QLineEdit()
-        self.samples_box.setText(str(64))
+        self.samples_box.setText(str(self.settings['biosemi']['samples']))
         self.fs_box = QtWidgets.QLineEdit()
         self.fs_box.setText(str(16000))
         connection_layout.addRow(QtWidgets.QLabel("IP"), self.ip_box)
@@ -153,7 +132,7 @@ class SelectionWindow(QtWidgets.QWidget):
         channel_layout.addWidget(QtWidgets.QLabel("Active Channels"))
         self.channel_selector = QtWidgets.QListView()
         self.channel_selector.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.channel_selector.setModel(electrodes_model[0])
+        self.channel_selector.setModel(electrodes_model)
         self.channel_selector.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
         channel_layout.addWidget(self.channel_selector)
         channel_frame.setLayout(channel_layout)
@@ -171,7 +150,7 @@ class SelectionWindow(QtWidgets.QWidget):
         reference_layout.addWidget(QtWidgets.QLabel("Reference Channel"))
         self.reference_selector = SingleSelectQListView()
         self.reference_selector.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.reference_selector.setModel(electrodes_model[0])
+        self.reference_selector.setModel(electrodes_model)
         self.reference_selector.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         reference_layout.addWidget(self.reference_selector)
         reference_frame.setLayout(reference_layout)
@@ -190,7 +169,8 @@ class SelectionWindow(QtWidgets.QWidget):
         fft_settings = QtWidgets.QWidget()
         fft_settings_layout = QtWidgets.QFormLayout()
         self.welch_window_box = QtWidgets.QSpinBox()
-        self.welch_window_box.setValue(1)
+        self.welch_window_box.setRange(0, 2**31-1)
+        self.welch_window_box.setValue(self.settings['fft']['welch_window'])
         fft_settings_layout.addRow(QtWidgets.QLabel("Welch Window [samples]"), self.welch_window_box)
         fft_settings.setLayout(fft_settings_layout)
 
@@ -215,18 +195,12 @@ class SelectionWindow(QtWidgets.QWidget):
         self.setLayout(selection_layout)
 
 class GraphWindow(QtWidgets.QWidget):
-    def __init__(self, electrodes_model):
+    def __init__(self, settings, electrodes_model):
         super().__init__()
-        self.fs = 20
-        self.ip = TCP_IP
-        self.port = TCP_PORT
-        self.samples = SAMPLES
-        self.total_channels = CHANNELS + EX_NODES
-        self.lowpass_freq = 0.5
-        self.highpass_freq = 100
+        self.settings = settings
+        self.electrodes_model = electrodes_model
         self.welch_enabled = True
         self.is_capturing = False
-        self.electrodes_model = electrodes_model
         self.graph_layout = QtWidgets.QVBoxLayout()
         # , y_range_controller=LiveAxisRange(fixed_range=[-100, 100])
         self.plot_widget = LivePlotWidget(title="EEG Channels @ 30Hz")
@@ -234,20 +208,20 @@ class GraphWindow(QtWidgets.QWidget):
         self.setLayout(self.graph_layout)
         
     def setActiveChannels(self, selection):
-        for i in range(self.electrodes_model[0].rowCount()):
-            idx = self.electrodes_model[0].index(i, 1)
-            self.electrodes_model[0].itemFromIndex(idx).setData(QtCore.QVariant(False))
+        for i in range(self.electrodes_model.rowCount()):
+            idx = self.electrodes_model.index(i, 1)
+            self.electrodes_model.itemFromIndex(idx).setData(QtCore.QVariant(False))
         
         for i in selection.indexes():
-            self.electrodes_model[0].itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(True))
+            self.electrodes_model.itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(True))
 
     def setReference(self, selection):
-        for i in range(self.electrodes_model[0].rowCount()):
-            idx = self.electrodes_model[0].index(i, 2)
-            self.electrodes_model[0].itemFromIndex(idx).setData(QtCore.QVariant(False))
+        for i in range(self.electrodes_model.rowCount()):
+            idx = self.electrodes_model.index(i, 2)
+            self.electrodes_model.itemFromIndex(idx).setData(QtCore.QVariant(False))
         
         for i in selection.indexes():
-            self.electrodes_model[0].itemFromIndex(i.siblingAtColumn(2)).setData(QtCore.QVariant(True))
+            self.electrodes_model.itemFromIndex(i.siblingAtColumn(2)).setData(QtCore.QVariant(True))
 
     def setSamples(self, samples):
         self.samples = int(samples)
@@ -272,24 +246,26 @@ class GraphWindow(QtWidgets.QWidget):
             self.stopCapture()
         if not DEBUG:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((self.ip, self.port))
+            self.sock.connect((self.settings['socket']['ip'], self.settings['socket']['port']))
+        total_channels = self.electrodes_model.rowCount()
+        fs = self.settings['biosemi']['fs']
         self.data_connectors = []
         self.plots = []
-        for i in range(32):
-            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/32, 0.8, 0.9))
-            self.data_connectors.append(DataConnector(plot, max_points=150, plot_rate=30))
+        for i in range(total_channels-1):
+            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels-1), 0.8, 0.9))
+            self.data_connectors.append(DataConnector(plot, max_points=fs*10, plot_rate=30))
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
         #for FFT
-        for i in range(32):
-            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/32, 0.8, 0.9))
+        for i in range(total_channels-1):
+            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels-1), 0.8, 0.9))
             self.data_connectors.append(DataConnector(plot, plot_rate=30))
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
         self.is_capturing = True
-        self.data_thread = Thread(target=self.readData, args=(self.electrodes_model, self.data_connectors))
+        self.data_thread = Thread(target=self.readData, args=(self.data_connectors,))
         self.data_thread.start()
-        print("Reading from ip %s and port %s" % (self.ip, self.port))
+        print("Reading from ip %s and port %s" % (self.settings['socket']['ip'], self.settings['socket']['port']))
 
     def stopCapture(self):
         if not self.is_capturing:
@@ -312,23 +288,30 @@ class GraphWindow(QtWidgets.QWidget):
     ##  ║ C1S1 ║║ C1S1 ║║ C1S1 ║ ║ C2S1 ║║ C2S1 ║║ C2S1 ║ ║ C1S2 ║║ C1S2 ║║ C1S2 ║ ║ C2S2 ║║ C2S2 ║║ C2S2 ║
     ##  ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║
     ##  ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝
-    def readData(self, electrodes_model, data_connectors):
+    def readData(self, data_connectors):
         x = 0
         # Apply gain based on physical max/min and digital max/min
-        gain = (PHYS_MAX - PHYS_MIN)/(DIGI_MAX - DIGI_MIN)
+        phys_range = self.settings['biosemi']['phys_max'] - self.settings['biosemi']['phys_min']
+        digi_range = self.settings['biosemi']['digi_max'] - self.settings['biosemi']['digi_min']
+        # Pre-emptively fetch a few values that will be called very often
+        samples = self.settings['biosemi']['samples']
+        fs = self.settings['biosemi']['fs']
+        total_channels = self.electrodes_model.rowCount()
+
+        gain = phys_range/digi_range
         active_channels = []
         active_reference = -1
-        model = electrodes_model[0]
-        welch_buffer = deque(maxlen=1024)
-        buffer_size = self.total_channels * self.samples * 3
-        for i in range(model.rowCount()):
+        welch_enabled = self.settings['fft']['welch_enabled']
+        welch_buffer = deque(maxlen=self.settings['fft']['welch_window'])
+        buffer_size = total_channels * self.settings['biosemi']['samples'] * 3
+        for i in range(total_channels):
             # Select active channels
-            idx = model.index(i,1)
-            if model.itemFromIndex(idx).data():
+            idx = self.electrodes_model.index(i,1)
+            if self.electrodes_model.itemFromIndex(idx).data(): 
                 active_channels.append(i)
             # Select reference point
-            idx = model.index(i,2)
-            if model.itemFromIndex(idx).data():
+            idx = self.electrodes_model.index(i,2)
+            if self.electrodes_model.itemFromIndex(idx).data():
                 active_reference = i
 
         while True:
@@ -340,9 +323,9 @@ class GraphWindow(QtWidgets.QWidget):
                 data = self.sock.recv(buffer_size)
 
             # Extract all channel samples from the packet
-            for m in range(self.samples):
+            for m in range(samples):
                 # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
-                ref_offset = (m * 3 * self.total_channels) + (active_reference*3)
+                ref_offset = (m * 3 * total_channels) + (active_reference*3)
                 sample = bytearray(1)
                 sample.append(data[ref_offset])
                 sample.append(data[ref_offset+1])
@@ -352,7 +335,7 @@ class GraphWindow(QtWidgets.QWidget):
                     # Samples are sent in bulk of size SAMPLES, interleaved such that
                     # the first sample of each channel is sent, then the second sample,
                     # and so on.
-                    offset = (m * 3 * self.total_channels) + (n*3)
+                    offset = (m * 3 * total_channels) + (n*3)
                     # The 3 bytes of each sample arrive in reverse order (little endian).
                     # We convert them to a 32bit integer by appending the bytes together,
                     # and adding a zero byte as LSB.
@@ -364,9 +347,9 @@ class GraphWindow(QtWidgets.QWidget):
                     welch_buffer.append(value)
                     
                     # # Send sample to plot
-                    if self.welch_enabled:
+                    if welch_enabled:
                         if len(welch_buffer) == welch_buffer.maxlen:
-                            f, pxx = signal.welch(x=welch_buffer, fs=self.fs)
+                            f, pxx = signal.welch(x=welch_buffer, fs=fs)
                             self.data_connectors[n].cb_set_data(pxx, f)
                     else:
                         self.data_connectors[n].cb_append_data_point((value - ref_value)*gain, x)
@@ -377,15 +360,9 @@ class GraphWindow(QtWidgets.QWidget):
                 if DEBUG:
                     sleep(0.01)
 
-    def fft_data(self, data):
-        f, pxx = signal.welch(x=data, fs=self.fs)
+    def fft_data(self, data, fs):
+        f, pxx = signal.welch(x=data, fs=fs)
         self.data_connectors[33].cb_set_data(pxx, f)
-
-    def setIP(self, ip):
-        self.ip = ip
-    
-    def setPort(self, port):
-        self.port = int(port)
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):
@@ -399,6 +376,7 @@ class SingleSelectQListView(QtWidgets.QListView):
 
     def mouseDoubleClickEvent(self, event):
         self.mousePressEvent(event)
+
 
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()
