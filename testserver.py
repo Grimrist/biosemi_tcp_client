@@ -13,14 +13,10 @@ from pglive.sources.live_plot import LiveLinePlot
 from pglive.sources.live_plot_widget import LivePlotWidget
 from pglive.sources.live_axis_range import LiveAxisRange
 
-DEBUG = True
+DEBUG = True ## SET TO FALSE IF RECORDING!!
 
-ACTIVE_CHANNEL = 1 # Channel being measured
-
-# Open socket
-# s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-# s.connect((TCP_IP, TCP_PORT))
-
+# MainWindow holds all other windows, initializes the settings,
+# and connects every needed signal to its respective slot.
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -93,6 +89,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 electrodes.appendRow([name, view_status, ref_status])
         self.electrodes_model = electrodes
 
+    def closeEvent(self, event):
+        self.settingsHandler.saveSettings()
+        event.accept()
+# SelectionWindow implements all the configuration UI,
+# as well as handling its' display on the interface.
+# Pending to implement: QScrollArea to contain all the widgets,
+# to allow adding even more options.
 class SelectionWindow(QtWidgets.QWidget):
     def __init__(self, settings, electrodes_model):
         super().__init__()
@@ -194,6 +197,9 @@ class SelectionWindow(QtWidgets.QWidget):
 
         self.setLayout(selection_layout)
 
+# GraphWindow currently serves the dual purpose of handling the graph display as well as
+# implementing the plotting logic itself. It might be a good idea to separate the two, 
+# in order to allow creating multiple plot windows if needed.
 class GraphWindow(QtWidgets.QWidget):
     def __init__(self, settings, electrodes_model):
         super().__init__()
@@ -204,6 +210,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.graph_layout = QtWidgets.QVBoxLayout()
         # , y_range_controller=LiveAxisRange(fixed_range=[-100, 100])
         self.plot_widget = LivePlotWidget(title="EEG Channels @ 30Hz")
+        self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.graph_layout.addWidget(self.plot_widget)
         self.setLayout(self.graph_layout)
         
@@ -263,6 +270,8 @@ class GraphWindow(QtWidgets.QWidget):
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
         self.is_capturing = True
+        if self.settings['fft']['welch_enabled']:
+            self.plot_widget.setLogMode(True, False)
         self.data_thread = Thread(target=self.readData, args=(self.data_connectors,))
         self.data_thread.start()
         print("Reading from ip %s and port %s" % (self.settings['socket']['ip'], self.settings['socket']['port']))
@@ -277,6 +286,7 @@ class GraphWindow(QtWidgets.QWidget):
             connector.deleteLater()
         self.plot_widget.deleteLater()
         self.plot_widget = LivePlotWidget(title="EEG Channels @ 30Hz")
+        self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.graph_layout.addWidget(self.plot_widget)
         self.data_thread.join()
         if not DEBUG:

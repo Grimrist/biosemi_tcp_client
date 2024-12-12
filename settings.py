@@ -2,6 +2,9 @@
 
 import json
 
+# SettingsHandler serves as the interface through which other modules
+# can update the global settings variable, which serves as an unique source 
+# of truth across the program. It also initializes the settings off of a local settings file.
 class SettingsHandler():
     def __init__(self, file_name, settings):
         self.file_name = file_name
@@ -26,7 +29,7 @@ class SettingsHandler():
 
         try:
             with open(self.file_name, 'r') as file:
-                self.settings.update(json.load(file))
+                self.settings.update(json.load(file)) # Since settings are a dictionary, we can just merge.
         except FileNotFoundError:
             # Can't read file, so we use defaults
             pass
