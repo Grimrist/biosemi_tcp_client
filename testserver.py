@@ -67,6 +67,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
         self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
 
+        # Filter settings
+        self.selection_window.decimating_factor_box.valueChanged.connect(self.settingsHandler.setDecimatingFactor)
+        self.selection_window.decimating_taps_box.valueChanged.connect(self.settingsHandler.setLowpassTaps)
+
         # FFT settings
         self.selection_window.welch_window_box.valueChanged.connect(self.settingsHandler.setWelchWindow)
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.settingsHandler.setWelchEnabled)
@@ -184,6 +188,30 @@ class SelectionWindow(QtWidgets.QWidget):
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         selection_layout.addItem(verticalSpacer) 
 
+        # Filter settings
+        filter_frame = QtWidgets.QFrame()
+        filter_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
+        filter_layout = QtWidgets.QVBoxLayout()
+
+        filter_settings = QtWidgets.QWidget()
+        filter_settings_layout = QtWidgets.QFormLayout()
+        self.decimating_factor_box = QtWidgets.QSpinBox()
+        self.decimating_factor_box.setRange(0, 2**31-1)
+        self.decimating_factor_box.setValue(self.settings['filter']['decimating_factor'])
+        filter_settings_layout.addRow(QtWidgets.QLabel("Decimating factor"), self.decimating_factor_box)
+        self.decimating_taps_box = QtWidgets.QSpinBox()
+        self.decimating_taps_box.setRange(0, 2**31-1)
+        self.decimating_taps_box.setValue(self.settings['filter']['lowpass_taps'])
+        filter_settings_layout.addRow(QtWidgets.QLabel("Alias filter taps"), self.decimating_taps_box)
+        filter_settings.setLayout(filter_settings_layout)
+
+        filter_layout.addWidget(filter_settings)
+        filter_frame.setLayout(filter_layout)
+        selection_layout.addWidget(filter_frame)
+
+        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        selection_layout.addItem(verticalSpacer) 
+
         # FFT settings
         fft_frame = QtWidgets.QFrame()
         fft_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
@@ -255,7 +283,7 @@ class GraphWindow(QtWidgets.QWidget):
         # Generate plots for time-domain graphing
         for i in range(total_channels-1):
             plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels-1), 0.8, 0.9))
-            self.data_connectors.append(DataConnector(plot, max_points=fs*10, plot_rate=30))
+            self.data_connectors.append(DataConnector(plot, max_points=(fs*10)/self.settings['filter']['decimating_factor'], plot_rate=30))
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
         # Generate plots for FFT graphing. We don't define max_points because we just set the data directly.
@@ -310,6 +338,12 @@ class GraphWindow(QtWidgets.QWidget):
         active_reference = -1
         welch_enabled = self.settings['fft']['welch_enabled']
         welch_buffers = []
+        decimate_factor = self.settings['filter']['decimating_factor']
+        print("Decimate factor:", decimate_factor)
+        if decimate_factor > 1: 
+            decimate_enabled = True
+        alias_filter = signal.firwin(numtaps=self.settings['filter']['lowpass_taps'], cutoff=fs/decimate_factor, pass_zero='lowpass', fs=fs)
+        zf = [None for i in range(len(data_connectors))]
         # Generate our buffers for FFT
         # We could skip this if FFT is not enabled, but I don't think it 
         # slows down regular time graphing too much
@@ -356,24 +390,33 @@ class GraphWindow(QtWidgets.QWidget):
                     sample.append(data[offset+1])
                     sample.append(data[offset+2])
                     value = int.from_bytes(sample, byteorder='little', signed=True)
+                    # Apply reference value and gain
+                    value = (value - ref_value)*gain
                     welch_buffers[n].append(value)
                     
-                    # # Send sample to plot
+                    # Send sample to plot
                     if welch_enabled:
                         if len(welch_buffers[n]) == welch_buffers[n].maxlen:
                             f, pxx = signal.welch(x=welch_buffers[n], fs=fs)
                             self.data_connectors[n + (total_channels-1)].cb_set_data(pxx, f)
+
+                    elif decimate_enabled:
+                        if zf[n] is None:
+                            zf[n] = signal.lfiltic(b=alias_filter, a=1, y=value)
+                            self.data_connectors[n].cb_append_data_point(value, x/fs)
+                        else: 
+                            [value], zf[n] = signal.lfilter(b=alias_filter, a=1, x=[value], zi=zf[n])
+
+                        if x % decimate_factor == 0:
+                            self.data_connectors[n].cb_append_data_point(value, x/fs)
                     else:
-                        self.data_connectors[n].cb_append_data_point((value - ref_value)*gain, x)
+                        self.data_connectors[n].cb_append_data_point(value, x/fs)
 
                 if not self.is_capturing:
                     return
                 x += 1
                 if DEBUG:
-                    sleep(0.01)
-
-    def fft_data(self, data, fs):
-        return signal.welch(x=data, fs=fs, nperseg=fs)
+                    sleep(1/self.settings['biosemi']['fs'])
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):

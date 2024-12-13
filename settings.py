@@ -22,6 +22,9 @@ class SettingsHandler():
         self.settings['biosemi']['fs'] = 16000 # Sampling rate
         self.settings['biosemi']['channels'] = [('A', 32), ('B', 32), ('EX', 8)] # (Set, Amount)
         self.settings['biosemi']['samples'] = 64 # Samples per channel
+        self.settings['filter'] = {}
+        self.settings['filter']['decimating_factor'] = 16 # Decimating factor
+        self.settings['filter']['lowpass_taps'] = 15 # Taps used for anti-aliasing filter
         self.settings['fft'] = {}
         self.settings['fft']['welch_enabled'] = False
         self.settings['fft']['welch_window'] = 64*16
@@ -57,6 +60,12 @@ class SettingsHandler():
     def setSamples(self, samples):
         self.settings['biosemi']['samples'] = int(samples)
 
+    def setDecimatingFactor(self, factor):
+        self.settings['filter']['decimating_factor'] = int(factor)
+
+    def setLowpassTaps(self, taps):
+        self.settings['filter']['lowpass_taps'] = int(taps)
+
     def setWelchEnabled(self, enable):
         if(enable == Qt.CheckState.Checked):
             self.settings['fft']['welch_enabled'] = True
@@ -65,5 +74,4 @@ class SettingsHandler():
 
     def setWelchWindow(self, window):
         self.settings['fft']['welch_window'] = int(window)
-
 
