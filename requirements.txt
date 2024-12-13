@@ -1,0 +1,7 @@
+numpy==1.26.4
+pglive==0.8.0
+PyQt6==6.8.0
+PyQt6-Qt6==6.8.1
+PyQt6_sip==13.9.1
+pyqtgraph==0.13.7
+scipy==1.14.1
