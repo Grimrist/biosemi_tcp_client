@@ -61,8 +61,8 @@ class MainWindow(QtWidgets.QMainWindow):
         selection_window.channels_box.textChanged.connect(graph_window.setTotalChannels)
 
         # Graph control
-        selection_window.channel_selector.selectionModel().selectionChanged.connect(graph_window.setActiveChannels)
-        selection_window.reference_selector.selectionModel().selectionChanged.connect(graph_window.setReference)
+        selection_window.channel_selector.selectionModel().selectionChanged.connect(self.setActiveChannels)
+        selection_window.reference_selector.selectionModel().selectionChanged.connect(self.setReference)
         
         selection_window.start_button.clicked.connect(graph_window.startCapture)
         selection_window.stop_button.clicked.connect(graph_window.stopCapture)
@@ -76,6 +76,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(main_widget)
         self.show()
 
+    # Initializes the model that holds the channel and reference selection
     def initialize_models(self):
         self.electrodes_model = None
         electrodes = QtGui.QStandardItemModel()
@@ -89,9 +90,24 @@ class MainWindow(QtWidgets.QMainWindow):
                 electrodes.appendRow([name, view_status, ref_status])
         self.electrodes_model = electrodes
 
+    def setActiveChannels(self, selection, deselection):
+        for i in deselection.indexes():
+            self.electrodes_model.itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(False))
+        print(selection.indexes())
+        for i in selection.indexes():
+            self.electrodes_model.itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(True))
+
+    def setReference(self, selection, deselection):
+        for i in range(self.electrodes_model.rowCount()):
+            idx = self.electrodes_model.index(i, 2)
+            self.electrodes_model.itemFromIndex(idx).setData(QtCore.QVariant(False))
+        for i in selection.indexes():
+            self.electrodes_model.itemFromIndex(i.siblingAtColumn(2)).setData(QtCore.QVariant(True))
+
     def closeEvent(self, event):
         self.settingsHandler.saveSettings()
         event.accept()
+
 # SelectionWindow implements all the configuration UI,
 # as well as handling its' display on the interface.
 # Pending to implement: QScrollArea to contain all the widgets,
@@ -214,22 +230,6 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.graph_layout.addWidget(self.plot_widget)
         self.setLayout(self.graph_layout)
-        
-    def setActiveChannels(self, selection):
-        for i in range(self.electrodes_model.rowCount()):
-            idx = self.electrodes_model.index(i, 1)
-            self.electrodes_model.itemFromIndex(idx).setData(QtCore.QVariant(False))
-        
-        for i in selection.indexes():
-            self.electrodes_model.itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(True))
-
-    def setReference(self, selection):
-        for i in range(self.electrodes_model.rowCount()):
-            idx = self.electrodes_model.index(i, 2)
-            self.electrodes_model.itemFromIndex(idx).setData(QtCore.QVariant(False))
-        
-        for i in selection.indexes():
-            self.electrodes_model.itemFromIndex(i.siblingAtColumn(2)).setData(QtCore.QVariant(True))
 
     def setSamples(self, samples):
         self.samples = int(samples)
@@ -265,7 +265,7 @@ class GraphWindow(QtWidgets.QWidget):
             self.data_connectors.append(DataConnector(plot, max_points=fs*10, plot_rate=30))
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
-        # Generate plots for FFT graphing. No maximum points because we just set the data directly
+        # Generate plots for FFT graphing. We don't define max_points because we just set the data directly.
         for i in range(total_channels-1):
             plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels-1), 0.8, 0.9))
             self.data_connectors.append(DataConnector(plot, plot_rate=30))
