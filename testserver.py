@@ -43,33 +43,33 @@ class MainWindow(QtWidgets.QMainWindow):
         self.initialize_models()
 
         # Initialize selection window and graph display window
-        selection_window = SelectionWindow(self.settings, self.electrodes_model)
-        selection_window.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Preferred)
-        graph_window = GraphWindow(self.settings, self.electrodes_model)
+        self.selection_window = SelectionWindow(self.settings, self.electrodes_model)
+        self.selection_window.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Preferred)
+        self.graph_window = GraphWindow(self.settings, self.electrodes_model)
 
         # Add to layout and attach to main window
-        main_layout.addWidget(selection_window)
-        main_layout.addWidget(graph_window)
+        main_layout.addWidget(self.selection_window)
+        main_layout.addWidget(self.graph_window)
         main_widget.setLayout(main_layout)
 
         ### Signal connections
         # Connection settings
-        selection_window.ip_box.textChanged.connect(self.settingsHandler.setIp)
-        selection_window.port_box.textChanged.connect(self.settingsHandler.setPort)
-        selection_window.samples_box.textChanged.connect(self.settingsHandler.setSamples)
-        selection_window.fs_box.textChanged.connect(self.settingsHandler.setFs)
-        selection_window.channels_box.textChanged.connect(graph_window.setTotalChannels)
+        self.selection_window.ip_box.textChanged.connect(self.settingsHandler.setIp)
+        self.selection_window.port_box.textChanged.connect(self.settingsHandler.setPort)
+        self.selection_window.samples_box.textChanged.connect(self.settingsHandler.setSamples)
+        self.selection_window.fs_box.textChanged.connect(self.settingsHandler.setFs)
+        self.selection_window.channels_box.textChanged.connect(self.graph_window.setTotalChannels)
 
         # Graph control
-        selection_window.channel_selector.selectionModel().selectionChanged.connect(self.setActiveChannels)
-        selection_window.reference_selector.selectionModel().selectionChanged.connect(self.setReference)
+        self.selection_window.channel_selector.selectionModel().selectionChanged.connect(self.setActiveChannels)
+        self.selection_window.reference_selector.selectionModel().selectionChanged.connect(self.setReference)
         
-        selection_window.start_button.clicked.connect(graph_window.startCapture)
-        selection_window.stop_button.clicked.connect(graph_window.stopCapture)
+        self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
+        self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
 
         # FFT settings
-        selection_window.welch_window_box.valueChanged.connect(self.settingsHandler.setWelchWindow)
-        selection_window.fft_checkbox.checkStateChanged.connect(self.settingsHandler.setWelchEnabled)
+        self.selection_window.welch_window_box.valueChanged.connect(self.settingsHandler.setWelchWindow)
+        self.selection_window.fft_checkbox.checkStateChanged.connect(self.settingsHandler.setWelchEnabled)
         ###
 
         # Show window
@@ -93,7 +93,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def setActiveChannels(self, selection, deselection):
         for i in deselection.indexes():
             self.electrodes_model.itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(False))
-        print(selection.indexes())
         for i in selection.indexes():
             self.electrodes_model.itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(True))
 
@@ -106,6 +105,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, event):
         self.settingsHandler.saveSettings()
+        self.graph_window.is_capturing = False
+        # I feel like this isn't a good way to do this, maybe
+        # they should always be initialized?
+        if hasattr(self.graph_window, 'data_thread'):
+            self.graph_window.data_thread.join()
+        if hasattr(self.graph_window, 'sock'):
+            self.graph_window.sock.close()
         event.accept()
 
 # SelectionWindow implements all the configuration UI,
@@ -132,7 +138,7 @@ class SelectionWindow(QtWidgets.QWidget):
         self.samples_box = QtWidgets.QLineEdit()
         self.samples_box.setText(str(self.settings['biosemi']['samples']))
         self.fs_box = QtWidgets.QLineEdit()
-        self.fs_box.setText(str(16000))
+        self.fs_box.setText(str(self.settings['biosemi']['fs']))
         connection_layout.addRow(QtWidgets.QLabel("IP"), self.ip_box)
         connection_layout.addRow(QtWidgets.QLabel("Port"), self.port_box)
         connection_layout.addRow(QtWidgets.QLabel("Total Channels"), self.channels_box)
@@ -231,22 +237,9 @@ class GraphWindow(QtWidgets.QWidget):
         self.graph_layout.addWidget(self.plot_widget)
         self.setLayout(self.graph_layout)
 
-    def setSamples(self, samples):
-        self.samples = int(samples)
-
-    def setSamplingRate(self, fs):
-        self.fs = int(fs)
-
     def setTotalChannels(self, channels):
         self.total_channels = int(channels)
 
-    def setWelchWindow(self, window):
-        self.welch_window = int(window)
-    
-    def enableWelch(self, enable):
-        self.welch_enabled = bool(enable)
-    
-    
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
     def startCapture(self):

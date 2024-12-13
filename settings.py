@@ -22,7 +22,6 @@ class SettingsHandler():
         self.settings['biosemi']['fs'] = 16000 # Sampling rate
         self.settings['biosemi']['channels'] = [('A', 32), ('B', 32), ('EX', 8)] # (Set, Amount)
         self.settings['biosemi']['samples'] = 64 # Samples per channel
-        self.settings['biosemi']['buffer_size'] = 0
         self.settings['fft'] = {}
         self.settings['fft']['welch_enabled'] = False
         self.settings['fft']['welch_window'] = 64*16
@@ -58,9 +57,6 @@ class SettingsHandler():
     def setSamples(self, samples):
         self.settings['biosemi']['samples'] = int(samples)
 
-    def setBufferSize(self, buffer_size):
-        self.settings['biosemi']['buffer_size'] = int(buffer_size)
-    
     def setWelchEnabled(self, enable):
         if(enable == Qt.CheckState.Checked):
             self.settings['fft']['welch_enabled'] = True
