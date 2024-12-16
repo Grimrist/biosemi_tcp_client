@@ -30,16 +30,17 @@ class MainWindow(QtWidgets.QMainWindow):
                            "QSpinBox { background: #CFD8DC }"
                            "QListView::item:selected { background: #546E7A }"
                            "QListView::item:selected:!active { }"
-                           "QPushButton { background: #CFD8DC }")
+                           "QPushButton { background: #CFD8DC }"
+                           "QComboBox { background: #CFD8DC; selection-background-color: #546E7A }")
 
         # Load settings
         self.settings = {}
         self.settingsHandler = SettingsHandler("settings.json", self.settings)
-
         # Initialize main window
         self.setWindowTitle("Biosemi TCP Reader")
         main_widget = QtWidgets.QWidget()
         main_layout = QtWidgets.QHBoxLayout()
+        self.electrodes_model = None
         self.initialize_models()
 
         # Initialize selection window and graph display window
@@ -58,7 +59,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.port_box.textChanged.connect(self.settingsHandler.setPort)
         self.selection_window.samples_box.textChanged.connect(self.settingsHandler.setSamples)
         self.selection_window.fs_box.textChanged.connect(self.settingsHandler.setFs)
-        self.selection_window.channels_box.textChanged.connect(self.graph_window.setTotalChannels)
+        self.selection_window.channels_box.currentTextChanged.connect(self.setTotalChannels)
+        self.selection_window.ex_electrodes_box.checkStateChanged.connect(self.setExEnabled)
 
         # Graph control
         self.selection_window.channel_selector.selectionModel().selectionChanged.connect(self.setActiveChannels)
@@ -82,17 +84,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # Initializes the model that holds the channel and reference selection
     def initialize_models(self):
-        self.electrodes_model = None
-        electrodes = QtGui.QStandardItemModel()
-        for (group, number) in self.settings['biosemi']['channels']:
+        if(self.electrodes_model is not None):
+            self.electrodes_model.clear()
+        else: self.electrodes_model = QtGui.QStandardItemModel()
+        for (group, number) in self.settings['biosemi']['channels'].items():
             for i in range(number):
                 name = QtGui.QStandardItem(group + str(i+1))
                 view_status = QtGui.QStandardItem()
                 view_status.setData(QtCore.QVariant(False))
                 ref_status = QtGui.QStandardItem()
                 ref_status.setData(QtCore.QVariant(False))
-                electrodes.appendRow([name, view_status, ref_status])
-        self.electrodes_model = electrodes
+                self.electrodes_model.appendRow([name, view_status, ref_status])
+
+    def setTotalChannels(self, channels):
+        self.settingsHandler.setChannels(channels)
+        self.initialize_models()
+
+    def setExEnabled(self, enable):
+        self.settingsHandler.setExEnabled(enable)
+        self.initialize_models()
 
     def setActiveChannels(self, selection, deselection):
         for i in deselection.indexes():
@@ -137,17 +147,22 @@ class SelectionWindow(QtWidgets.QWidget):
         self.ip_box.setText(self.settings['socket']['ip'])
         self.port_box = QtWidgets.QLineEdit()
         self.port_box.setText(str(self.settings['socket']['port']))
-        self.channels_box = QtWidgets.QLineEdit()
-        self.channels_box.setText(str(64 + 8))
         self.samples_box = QtWidgets.QLineEdit()
         self.samples_box.setText(str(self.settings['biosemi']['samples']))
         self.fs_box = QtWidgets.QLineEdit()
         self.fs_box.setText(str(self.settings['biosemi']['fs']))
+        self.channels_box = QtWidgets.QComboBox()
+        self.channels_box.addItems(["A1-B32 (64)", "A1-A32 (32)", "A1-A16 (16)", "A1-A8 (8)"])
+        self.ex_electrodes_box = QtWidgets.QCheckBox()
+        self.ex_electrodes_box.setText("8 EX-Electrodes")
+        self.ex_electrodes_box.setChecked(self.settings['biosemi']['ex_enabled'])
+
         connection_layout.addRow(QtWidgets.QLabel("IP"), self.ip_box)
         connection_layout.addRow(QtWidgets.QLabel("Port"), self.port_box)
-        connection_layout.addRow(QtWidgets.QLabel("Total Channels"), self.channels_box)
         connection_layout.addRow(QtWidgets.QLabel("Samples"), self.samples_box)
         connection_layout.addRow(QtWidgets.QLabel("Sampling rate [Hz]"), self.fs_box)
+        connection_layout.addRow(QtWidgets.QLabel("Channels"), self.channels_box)
+        connection_layout.addWidget(self.ex_electrodes_box)
         selection_layout.addWidget(connection_frame)
         connection_frame.setLayout(connection_layout)
 
@@ -196,7 +211,7 @@ class SelectionWindow(QtWidgets.QWidget):
         filter_settings = QtWidgets.QWidget()
         filter_settings_layout = QtWidgets.QFormLayout()
         self.decimating_factor_box = QtWidgets.QSpinBox()
-        self.decimating_factor_box.setRange(0, 2**31-1)
+        self.decimating_factor_box.setRange(1, 2**31-1)
         self.decimating_factor_box.setValue(self.settings['filter']['decimating_factor'])
         filter_settings_layout.addRow(QtWidgets.QLabel("Decimating factor"), self.decimating_factor_box)
         self.decimating_taps_box = QtWidgets.QSpinBox()
@@ -264,9 +279,6 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.graph_layout.addWidget(self.plot_widget)
         self.setLayout(self.graph_layout)
-
-    def setTotalChannels(self, channels):
-        self.total_channels = int(channels)
 
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
