@@ -1,3 +1,4 @@
+- Figure out why my sine simulation doesnt work
 - Change total channel selection to a dropdown box with same selections as biosemi
 - Handle errors due to dropped packets/data loss
 - Determine ADC range to properly display uV values

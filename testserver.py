@@ -325,6 +325,7 @@ class GraphWindow(QtWidgets.QWidget):
     ##  ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝
     def readData(self, data_connectors):
         x = 0
+        decimate_enabled = False
         # Apply gain based on physical max/min and digital max/min
         phys_range = self.settings['biosemi']['phys_max'] - self.settings['biosemi']['phys_min']
         digi_range = self.settings['biosemi']['digi_max'] - self.settings['biosemi']['digi_min']
@@ -333,7 +334,7 @@ class GraphWindow(QtWidgets.QWidget):
         fs = self.settings['biosemi']['fs']
         total_channels = self.electrodes_model.rowCount()
 
-        gain = phys_range/digi_range
+        gain = phys_range/(digi_range * 2**8)
         active_channels = []
         active_reference = -1
         welch_enabled = self.settings['fft']['welch_enabled']
@@ -342,7 +343,7 @@ class GraphWindow(QtWidgets.QWidget):
         print("Decimate factor:", decimate_factor)
         if decimate_factor > 1: 
             decimate_enabled = True
-        alias_filter = signal.firwin(numtaps=self.settings['filter']['lowpass_taps'], cutoff=fs/decimate_factor, pass_zero='lowpass', fs=fs)
+            alias_filter = signal.firwin(numtaps=self.settings['filter']['lowpass_taps'], cutoff=fs/decimate_factor, pass_zero='lowpass', fs=fs)
         zf = [None for i in range(len(data_connectors))]
         # Generate our buffers for FFT
         # We could skip this if FFT is not enabled, but I don't think it 
@@ -359,11 +360,28 @@ class GraphWindow(QtWidgets.QWidget):
             idx = self.electrodes_model.index(i,2)
             if self.electrodes_model.itemFromIndex(idx).data():
                 active_reference = i
-
+        if DEBUG:
+            t = 0 # Used for generating sine signal continuously
         while True:
             if DEBUG:
-                rng = numpy.random.default_rng()
-                data = rng.bytes(buffer_size)
+                # rng = numpy.random.default_rng()
+                # data = rng.bytes(buffer_size)
+                # Instead of doing random values, let's try generating a 10 [Hz] sine wave
+                data = bytearray()
+                lspace = numpy.linspace(t, t+(samples/fs), samples)
+                for i in lspace:
+                    for k in range(total_channels):
+                        val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*10000)
+                        val = (val_orig).to_bytes(3, byteorder='little', signed=True)
+                        if(len(val) > 3):
+                            val = val[-3:]
+                        val_rec = bytearray(1)
+                        val_rec.append(val[0])
+                        val_rec.append(val[1])
+                        val_rec.append(val[2])
+                        val_rec = int.from_bytes(val, byteorder='little', signed=True)
+                        data.extend(val)
+                t += samples/fs
             else:
                 # Read the next packet from the network
                 data = self.sock.recv(buffer_size)
@@ -371,12 +389,15 @@ class GraphWindow(QtWidgets.QWidget):
             # Extract all channel samples from the packet
             for m in range(samples):
                 # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
-                ref_offset = (m * 3 * total_channels) + (active_reference*3)
-                sample = bytearray(1)
-                sample.append(data[ref_offset])
-                sample.append(data[ref_offset+1])
-                sample.append(data[ref_offset+2])
-                ref_value = int.from_bytes(sample, byteorder='little', signed=True)
+                if(active_reference > -1):
+                    ref_offset = (m * 3 * total_channels) + (active_reference*3)
+                    sample = bytearray(1)
+                    sample.append(data[ref_offset])
+                    sample.append(data[ref_offset+1])
+                    sample.append(data[ref_offset+2])
+                    ref_value = int.from_bytes(sample, byteorder='little', signed=True)
+                else:
+                    ref_value = 0
                 for n in active_channels:
                     # Samples are sent in bulk of size SAMPLES, interleaved such that
                     # the first sample of each channel is sent, then the second sample,
