@@ -21,6 +21,7 @@ FREQ_BANDS = {
     "Beta": [13, 30],
     "Gamma": [30, 100]
 }
+MAX_ERRORS = 5
 
 # MainWindow holds all other windows, initializes the settings,
 # and connects every needed signal to its respective slot.
@@ -377,6 +378,7 @@ class GraphWindow(QtWidgets.QWidget):
     ##  ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝
     def readData(self, data_connectors):
         x = 0
+        packet_failed = 0
         decimate_enabled = False
         # Apply gain based on physical max/min and digital max/min
         phys_range = self.settings['biosemi']['phys_max'] - self.settings['biosemi']['phys_min']
@@ -385,7 +387,6 @@ class GraphWindow(QtWidgets.QWidget):
         samples = self.settings['biosemi']['samples']
         fs = self.settings['biosemi']['fs']
         total_channels = self.electrodes_model.rowCount()
-
         gain = phys_range/(digi_range * 2**8)
         active_channels = []
         active_reference = -1
@@ -498,11 +499,13 @@ class GraphWindow(QtWidgets.QWidget):
                     if not self.is_capturing:
                         return
                     x += 1
+                    if packet_failed > 0:
+                        packet_failed -= 1
                     if DEBUG:
                         sleep(1/self.settings['biosemi']['fs'])
             except IndexError:
                 packet_failed += 1
-                if(packet_failed > MAX_ERRORS):
+                if packet_failed > MAX_ERRORS:
                     print("Failed to read packets too many times, dropping connection")
                 return
                 

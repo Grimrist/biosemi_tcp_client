@@ -1,4 +1,3 @@
 - Change aggregator classes (settings, model?) to have accessors so we no longer use direct references
-- Handle errors due to dropped packets/data loss
 - Determine ADC range to properly display uV values
 - Try detecting fft amplitude values
