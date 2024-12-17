@@ -14,6 +14,13 @@ from pglive.sources.live_plot_widget import LivePlotWidget
 from pglive.sources.live_axis_range import LiveAxisRange
 
 DEBUG = True ## SET TO FALSE IF RECORDING!!
+FREQ_BANDS = {
+    "Delta": [1, 3],
+    "Theta": [4, 7],
+    "Alpha": [8, 12],
+    "Beta": [13, 30],
+    "Gamma": [30, 100]
+}
 
 # MainWindow holds all other windows, initializes the settings,
 # and connects every needed signal to its respective slot.
@@ -21,7 +28,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setStyleSheet("QMainWindow { background-color: #263238; color: #ffffff }"
-                           "QFrame { background-color: #37474F; color: #ffffff }"
+                           "QFrame { background-color: #455A64; color: #ffffff }"
                            "QCheckBox { color: #ffffff }"
                            "QCheckBox::indicator::unchecked { background-color: #CFD8DC }"
                            "QCheckBox::indicator::checked { background-color: #B0BEC5; border-image: url(./check.svg)}"
@@ -31,7 +38,10 @@ class MainWindow(QtWidgets.QMainWindow):
                            "QListView::item:selected { background: #546E7A }"
                            "QListView::item:selected:!active { }"
                            "QPushButton { background: #CFD8DC }"
-                           "QComboBox { background: #CFD8DC; selection-background-color: #546E7A }")
+                           "QComboBox { background: #CFD8DC; selection-background-color: #546E7A }"
+                           "QTabWidget { border: #CFD8DC; background: #263238; background-color: #263238 }"
+                           "QTabWidget > QWidget { background-color: #37474F }"
+                           "QTabBar { background: #546E7A; color: #ffffff }")
 
         # Load settings
         self.settings = {}
@@ -40,13 +50,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("Biosemi TCP Reader")
         main_widget = QtWidgets.QWidget()
         main_layout = QtWidgets.QHBoxLayout()
+        # Initialize models
         self.electrodes_model = None
-        self.initialize_models()
+        self.initialize_electrodes()
+        self.freq_bands_model = None
+        self.initialize_bands()
 
         # Initialize selection window and graph display window
-        self.selection_window = SelectionWindow(self.settings, self.electrodes_model)
+        self.selection_window = SelectionWindow(self.settings, self.electrodes_model, self.freq_bands_model)
         self.selection_window.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Preferred)
-        self.graph_window = GraphWindow(self.settings, self.electrodes_model)
+        self.graph_window = GraphWindow(self.settings, self.electrodes_model, self.freq_bands_model)
 
         # Add to layout and attach to main window
         main_layout.addWidget(self.selection_window)
@@ -83,7 +96,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show()
 
     # Initializes the model that holds the channel and reference selection
-    def initialize_models(self):
+    def initialize_electrodes(self):
         if(self.electrodes_model is not None):
             self.electrodes_model.clear()
         else: self.electrodes_model = QtGui.QStandardItemModel()
@@ -96,13 +109,20 @@ class MainWindow(QtWidgets.QMainWindow):
                 ref_status.setData(QtCore.QVariant(False))
                 self.electrodes_model.appendRow([name, view_status, ref_status])
 
+    def initialize_bands(self):
+        if(self.freq_bands_model is not None):
+            self.freq_bands_model.clear()
+        else: 
+            data = [[k,0] for k in FREQ_BANDS.keys()]
+            self.freq_bands_model = TableModel(data, ["Bands", "Frequency"])
+
     def setTotalChannels(self, channels):
         self.settingsHandler.setChannels(channels)
-        self.initialize_models()
+        self.initialize_electrodes()
 
     def setExEnabled(self, enable):
         self.settingsHandler.setExEnabled(enable)
-        self.initialize_models()
+        self.initialize_electrodes()
 
     def setActiveChannels(self, selection, deselection):
         for i in deselection.indexes():
@@ -121,7 +141,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settingsHandler.saveSettings()
         self.graph_window.is_capturing = False
         # I feel like this isn't a good way to do this, maybe
-        # they should always be initialized?
+        # these members should always exist?
         if hasattr(self.graph_window, 'data_thread'):
             self.graph_window.data_thread.join()
         if hasattr(self.graph_window, 'sock'):
@@ -132,11 +152,15 @@ class MainWindow(QtWidgets.QMainWindow):
 # as well as handling its' display on the interface.
 # Pending to implement: QScrollArea to contain all the widgets,
 # to allow adding even more options.
-class SelectionWindow(QtWidgets.QWidget):
-    def __init__(self, settings, electrodes_model):
+class SelectionWindow(QtWidgets.QTabWidget):
+    def __init__(self, settings, electrodes_model, freq_bands_model):
         super().__init__()
         self.settings = settings
         self.electrodes_model = electrodes_model
+
+        # Two tabs: one for settings, the other for value monitoring
+        ## Settings tab
+        settings_window = QtWidgets.QWidget()
         selection_layout = QtWidgets.QVBoxLayout()
 
         # Connection settings
@@ -261,16 +285,32 @@ class SelectionWindow(QtWidgets.QWidget):
         button_widget.setLayout(button_layout)
         selection_layout.addWidget(button_widget)
 
-        self.setLayout(selection_layout)
+        settings_window.setLayout(selection_layout)
+        self.addTab(settings_window, "Settings")
+
+        ## Measurements tab
+        measurements_window = QtWidgets.QWidget()
+        measurements_layout = QtWidgets.QVBoxLayout()
+
+        freq_bands_table = QtWidgets.QTableView()
+        freq_bands_table.setModel(freq_bands_model)
+        measurements_layout.addWidget(freq_bands_table)
+
+        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        measurements_layout.addItem(verticalSpacer) 
+        measurements_window.setLayout(measurements_layout)
+        self.addTab(measurements_window, "Measurements")
+
 
 # GraphWindow currently serves the dual purpose of handling the graph display as well as
 # implementing the plotting logic itself. It might be a good idea to separate the two, 
 # in order to allow creating multiple plot windows if needed.
 class GraphWindow(QtWidgets.QWidget):
-    def __init__(self, settings, electrodes_model):
+    def __init__(self, settings, electrodes_model, freq_bands_model):
         super().__init__()
         self.settings = settings
         self.electrodes_model = electrodes_model
+        self.freq_bands_model = freq_bands_model
         self.welch_enabled = True
         self.is_capturing = False
         self.graph_layout = QtWidgets.QVBoxLayout()
@@ -350,6 +390,7 @@ class GraphWindow(QtWidgets.QWidget):
         active_channels = []
         active_reference = -1
         welch_enabled = self.settings['fft']['welch_enabled']
+        welch_window = self.settings['fft']['welch_window']
         welch_buffers = []
         decimate_factor = self.settings['filter']['decimating_factor']
         print("Decimate factor:", decimate_factor)
@@ -361,7 +402,7 @@ class GraphWindow(QtWidgets.QWidget):
         # We could skip this if FFT is not enabled, but I don't think it 
         # slows down regular time graphing too much
         for i in range(total_channels):
-            welch_buffers.append(deque(maxlen=self.settings['fft']['welch_window']))
+            welch_buffers.append(deque(maxlen=welch_window))
         buffer_size = total_channels * self.settings['biosemi']['samples'] * 3
         for i in range(total_channels):
             # Select active channels
@@ -376,14 +417,16 @@ class GraphWindow(QtWidgets.QWidget):
             t = 0 # Used for generating sine signal continuously
         while True:
             if DEBUG:
-                # rng = numpy.random.default_rng()
+                rng = numpy.random.default_rng()
                 # data = rng.bytes(buffer_size)
-                # Instead of doing random values, let's try generating a 10 [Hz] sine wave
+                # Instead of doing random values, let's try generating a 10 [Hz] sine wave with some noise
                 data = bytearray()
                 lspace = numpy.linspace(t, t+(samples/fs), samples)
-                for i in lspace:
+                noise_power = 0.00001 * fs/2
+                noise = rng.normal(scale=numpy.sqrt(noise_power), size=lspace.shape)
+                for j, i in enumerate(lspace):
                     for k in range(total_channels):
-                        val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*10000)
+                        val_orig = int((numpy.sin(2 * numpy.pi * 10 * i) + noise[j])*10000) 
                         val = (val_orig).to_bytes(3, byteorder='little', signed=True)
                         if(len(val) > 3):
                             val = val[-3:]
@@ -399,57 +442,70 @@ class GraphWindow(QtWidgets.QWidget):
                 data = self.sock.recv(buffer_size)
 
             # Extract all channel samples from the packet
-            for m in range(samples):
-                # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
-                if(active_reference > -1):
-                    ref_offset = (m * 3 * total_channels) + (active_reference*3)
-                    sample = bytearray(1)
-                    sample.append(data[ref_offset])
-                    sample.append(data[ref_offset+1])
-                    sample.append(data[ref_offset+2])
-                    ref_value = int.from_bytes(sample, byteorder='little', signed=True)
-                else:
-                    ref_value = 0
-                for n in active_channels:
-                    # Samples are sent in bulk of size SAMPLES, interleaved such that
-                    # the first sample of each channel is sent, then the second sample,
-                    # and so on.
-                    offset = (m * 3 * total_channels) + (n*3)
-                    # The 3 bytes of each sample arrive in reverse order (little endian).
-                    # We convert them to a 32bit integer by appending the bytes together,
-                    # and adding a zero byte as LSB.
-                    sample = bytearray(1)
-                    sample.append(data[offset])
-                    sample.append(data[offset+1])
-                    sample.append(data[offset+2])
-                    value = int.from_bytes(sample, byteorder='little', signed=True)
-                    # Apply reference value and gain
-                    value = (value - ref_value)*gain
-                    welch_buffers[n].append(value)
-                    
-                    # Send sample to plot
-                    if welch_enabled:
-                        if len(welch_buffers[n]) == welch_buffers[n].maxlen:
-                            f, pxx = signal.welch(x=welch_buffers[n], fs=fs)
-                            self.data_connectors[n + (total_channels-1)].cb_set_data(pxx, f)
-
-                    elif decimate_enabled:
-                        if zf[n] is None:
-                            zf[n] = signal.lfiltic(b=alias_filter, a=1, y=value)
-                            self.data_connectors[n].cb_append_data_point(value, x/fs)
-                        else: 
-                            [value], zf[n] = signal.lfilter(b=alias_filter, a=1, x=[value], zi=zf[n])
-
-                        if x % decimate_factor == 0:
-                            self.data_connectors[n].cb_append_data_point(value, x/fs)
+            # We use a try statement as occasionally packet loss messes up the data
+            try:
+                for m in range(samples):
+                    # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
+                    if(active_reference > -1):
+                        ref_offset = (m * 3 * total_channels) + (active_reference*3)
+                        sample = bytearray(1)
+                        sample.append(data[ref_offset])
+                        sample.append(data[ref_offset+1])
+                        sample.append(data[ref_offset+2])
+                        ref_value = int.from_bytes(sample, byteorder='little', signed=True)
                     else:
-                        self.data_connectors[n].cb_append_data_point(value, x/fs)
+                        ref_value = 0
+                    for n in active_channels:
+                        # Samples are sent in bulk of size SAMPLES, interleaved such that
+                        # the first sample of each channel is sent, then the second sample,
+                        # and so on.
+                        offset = (m * 3 * total_channels) + (n*3)
+                        # The 3 bytes of each sample arrive in reverse order (little endian).
+                        # We convert them to a 32bit integer by appending the bytes together,
+                        # and adding a zero byte as LSB.
+                        sample = bytearray(1)
+                        sample.append(data[offset])
+                        sample.append(data[offset+1])
+                        sample.append(data[offset+2])
+                        value = int.from_bytes(sample, byteorder='little', signed=True)
+                        # Apply reference value and gain
+                        value = (value - ref_value)*gain
+                        welch_buffers[n].append(value)
+                        
+                        # Send sample to plot
+                        if welch_enabled:
+                            if len(welch_buffers[n]) == welch_buffers[n].maxlen:
+                                f, pxx = signal.welch(x=welch_buffers[n], fs=fs, nperseg=welch_window/5)
+                                self.data_connectors[n + (total_channels-1)].cb_set_data(pxx, f)
+                                alpha_avg = []
+                                for i, freq in enumerate(f):
+                                    if FREQ_BANDS['Alpha'][0] <= freq <= FREQ_BANDS['Alpha'][1]:
+                                        alpha_avg.append(pxx[i])
+                                self.freq_bands_model.setData(self.freq_bands_model.index(2,1), int(sum(alpha_avg)/len(alpha_avg)))
 
-                if not self.is_capturing:
-                    return
-                x += 1
-                if DEBUG:
-                    sleep(1/self.settings['biosemi']['fs'])
+                        elif decimate_enabled:
+                            if zf[n] is None:
+                                zf[n] = signal.lfiltic(b=alias_filter, a=1, y=value)
+                                self.data_connectors[n].cb_append_data_point(value, x/fs)
+                            else: 
+                                [value], zf[n] = signal.lfilter(b=alias_filter, a=1, x=[value], zi=zf[n])
+
+                            if x % decimate_factor == 0:
+                                self.data_connectors[n].cb_append_data_point(value, x/fs)
+                        else:
+                            self.data_connectors[n].cb_append_data_point(value, x/fs)
+
+                    if not self.is_capturing:
+                        return
+                    x += 1
+                    if DEBUG:
+                        sleep(1/self.settings['biosemi']['fs'])
+            except IndexError:
+                packet_failed += 1
+                if(packet_failed > MAX_ERRORS):
+                    print("Failed to read packets too many times, dropping connection")
+                return
+                
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):
@@ -464,6 +520,53 @@ class SingleSelectQListView(QtWidgets.QListView):
     def mouseDoubleClickEvent(self, event):
         self.mousePressEvent(event)
 
+# For some reason, there's no existing implementation for this interface,
+# so we make our own, even though it really doesn't need to do anything fancy.
+# Currently designed as an array and can't be expanded after initialization. 
+# Wouldn't be too difficult to extend later.
+class TableModel(QtCore.QAbstractTableModel):
+    def __init__(self, data, header):
+        super().__init__()
+        self._header = header
+        self._data = data
+    
+    # Our table is stored as row-major, so we just need the array's length
+    def rowCount(self, parent):
+        if parent.isValid():
+            return 0
+        return len(self._data)
+
+    # We assume all subarrays are the correct size in our _data array.
+    def columnCount(self, parent):
+        if parent.isValid():
+            return 0
+        return len(self._data[0])
+
+    def data(self, index, role = QtCore.Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            return QtCore.QVariant(self._data[index.row()][index.column()])
+        return None
+
+    def setData(self, index, value, role = QtCore.Qt.ItemDataRole.EditRole):
+        if not index.isValid():
+            return False
+        if role == QtCore.Qt.ItemDataRole.EditRole:
+            self._data[index.row()][index.column()] = value
+            self.dataChanged.emit(index, index, [role])
+            return True
+        return False
+
+    # Just ignoring orientation for now, as well as role
+    def headerData(self, section, orientation, role = QtCore.Qt.ItemDataRole.DisplayRole):
+        if orientation == QtCore.Qt.Orientation.Horizontal and role == QtCore.Qt.ItemDataRole.DisplayRole:
+            return QtCore.QVariant(self._header[section])
+        return QtCore.QVariant() 
+
+    # Our table is for viewing only, so we just return NoItemFlags.
+    def flags(self, index):
+        return QtCore.Qt.ItemFlag.NoItemFlags
 
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()
