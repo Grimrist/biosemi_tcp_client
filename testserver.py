@@ -17,7 +17,7 @@ from pglive.sources.live_axis_range import LiveAxisRange
 DEBUG = False
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
     DEBUG = True
-    
+
 FREQ_BANDS = {
     "Delta": [1, 3],
     "Theta": [4, 7],
@@ -358,8 +358,8 @@ class GraphWindow(QtWidgets.QWidget):
         self.data_connectors = []
         self.plots = []
         # Generate plots for time-domain graphing
-        for i in range(total_channels-1):
-            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels-1), 0.8, 0.9))
+        for i in range(total_channels):
+            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9))
             data_connector = DataConnector(plot, max_points=(fs*2)/self.settings['filter']['decimating_factor'], plot_rate=30, ignore_auto_range=True)
             data_connector.pause()
             self.data_connectors.append(data_connector)
@@ -367,8 +367,8 @@ class GraphWindow(QtWidgets.QWidget):
             self.plot_widget.addItem(plot)
             plot.hide()
         # Generate plots for FFT graphing. We don't define max_points because we just set the data directly.
-        for i in range(total_channels-1):
-            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels-1), 0.8, 0.9))
+        for i in range(total_channels):
+            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9))
             data_connector = DataConnector(plot, plot_rate=30)
             data_connector.pause()
             self.data_connectors.append(data_connector)
@@ -535,7 +535,10 @@ class GraphWindow(QtWidgets.QWidget):
                                     for i, freq in enumerate(f):
                                         if FREQ_BANDS['Alpha'][0] <= freq <= FREQ_BANDS['Alpha'][1]:
                                             alpha_avg.append(pxx[i])
-                                    self.freq_bands_model.setData(self.freq_bands_model.index(2,1), int(sum(alpha_avg)/len(alpha_avg)))
+                                    try:
+                                        self.freq_bands_model.setData(self.freq_bands_model.index(2,1), int(sum(alpha_avg)/len(alpha_avg)))
+                                    except ZeroDivisionError:
+                                        pass
 
                         if decimate_enabled:
                             if zf[n] is None:
