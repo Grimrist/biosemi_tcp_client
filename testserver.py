@@ -340,7 +340,8 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_plot.getAxis('bottom').enableAutoSIPrefix(False)
         self.fft_plot.getAxis('left').enableAutoSIPrefix(False)
         self.fft_plot.setLabel('bottom', "Frequency", "Hz")
-        self.fft_plot.setLabel('left', "Power", "uV**2/Hz")
+        self.fft_plot.setLabel('left', "Power", "dB")
+        self.fft_plot.getAxis('bottom').setStyle(tickTextWidth=1)
         self.fft_plot.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.graph_layout.addWidget(self.fft_plot)
         if not self.settings['fft']['welch_enabled']:
@@ -418,7 +419,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_plot.getAxis('bottom').enableAutoSIPrefix(False)
         self.fft_plot.getAxis('left').enableAutoSIPrefix(False)
         self.fft_plot.setLabel('bottom', "Frequency", "Hz")
-        self.fft_plot.setLabel('left', "Power", "uV**2/Hz")
+        self.fft_plot.setLabel('left', "Power", "dB")
         self.graph_layout.addWidget(self.fft_plot)
         if not self.settings['fft']['welch_enabled']:
             self.fft_plot.hide()
@@ -494,7 +495,7 @@ class GraphWindow(QtWidgets.QWidget):
                 for j, i in enumerate(lspace):
                     for k in range(total_channels):
                         if t > 15: val_orig = int((numpy.sin(2 * numpy.pi * 100 * i) + noise[j])*10000) 
-                        else: val_orig = int((numpy.sin(2 * numpy.pi * 10 * i) + noise[j])*1000000) 
+                        else: val_orig = int((numpy.sin(2 * numpy.pi * 10 * i) + noise[j])*10000) 
                         val = (val_orig).to_bytes(3, byteorder='little', signed=True)
                         if(len(val) > 3):
                             val = val[-3:]
@@ -544,10 +545,10 @@ class GraphWindow(QtWidgets.QWidget):
                         # Send sample to plot
                         # Rate limited to only check every full set of samples
                         if welch_enabled:
-                            if x % 512*samples == 0:
+                            if x % 128*samples == 0:
                                 if len(welch_buffers[n]) == welch_buffers[n].maxlen:
                                     f, pxx = signal.welch(x=welch_buffers[n], fs=fs, nperseg=welch_window/5)
-                                    self.data_connectors[n + (total_channels)].cb_set_data(pxx, f)
+                                    self.data_connectors[n + (total_channels)].cb_set_data(10*numpy.log10(pxx), f)
                                     alpha_avg = []
                                     for i, freq in enumerate(f):
                                         if FREQ_BANDS['Alpha'][0] <= freq <= FREQ_BANDS['Alpha'][1]:
