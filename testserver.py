@@ -330,9 +330,13 @@ class GraphWindow(QtWidgets.QWidget):
         self.graph_layout = QtWidgets.QVBoxLayout()
         self.plot_widget = LivePlotWidget(title="EEG time-domain plot")
         self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
+        self.plot_widget.setLabel('bottom', "Time", "s")
+        self.plot_widget.setLabel('left', "Magnitude", "V")
         self.graph_layout.addWidget(self.plot_widget)
         self.fft_plot = LivePlotWidget(title="Power spectral density graph")
         self.fft_plot.setLogMode(True, False)
+        self.fft_plot.setLabel('bottom', "Frequency", "f")
+        self.fft_plot.setLabel('left', "Power", "V**2/Hz")
         self.fft_plot.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.graph_layout.addWidget(self.fft_plot)
         if not self.settings['fft']['welch_enabled']:
@@ -399,10 +403,14 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_plot.deleteLater()
         self.plot_widget = LivePlotWidget(title="EEG time-domain plot")
         self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
+        self.plot_widget.setLabel('bottom', "Time", "s")
+        self.plot_widget.setLabel('left', "Magnitude", "V")
         self.graph_layout.addWidget(self.plot_widget)
         self.fft_plot = LivePlotWidget(title="Power spectral density graph")
         self.fft_plot.setLogMode(True, False)
         self.fft_plot.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
+        self.fft_plot.setLabel('bottom', "Frequency", "f")
+        self.fft_plot.setLabel('left', "Power", "V**2/Hz")
         self.graph_layout.addWidget(self.fft_plot)
         if not self.settings['fft']['welch_enabled']:
             self.fft_plot.hide()
@@ -426,6 +434,7 @@ class GraphWindow(QtWidgets.QWidget):
         samples = self.settings['biosemi']['samples']
         fs = self.settings['biosemi']['fs']
         total_channels = self.electrodes_model.rowCount()
+        print(phys_range, digi_range)
         gain = phys_range/(digi_range * 2**8)
         active_channels = []
         active_reference = -1

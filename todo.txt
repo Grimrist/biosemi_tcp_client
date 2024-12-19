@@ -6,6 +6,4 @@
 - Implement separate data worker thread so that the thread can terminate itself if needed. 
     - Potentially allow changing which data we're reading in real time.
 - Change aggregator classes (settings, model?) to have accessors so we no longer use direct references
-- Determine ADC range to properly display uV values
-    - I think my current calculation is actually correct? It's hard to tell with no oscilloscope
 - Try detecting fft amplitude values
