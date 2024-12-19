@@ -14,7 +14,10 @@ from pglive.sources.live_plot import LiveLinePlot
 from pglive.sources.live_plot_widget import LivePlotWidget
 from pglive.sources.live_axis_range import LiveAxisRange
 
-DEBUG = True ## SET TO FALSE IF RECORDING!!
+DEBUG = False
+if len(sys.argv) > 1 and sys.argv[1] == "-d":
+    DEBUG = True
+    
 FREQ_BANDS = {
     "Delta": [1, 3],
     "Theta": [4, 7],
@@ -83,6 +86,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
         self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
+
+        self.selection_window.fft_checkbox.checkStateChanged.connect(self.graph_window.toggleFFT)
 
         # Filter settings
         self.selection_window.decimating_factor_box.valueChanged.connect(self.settingsHandler.setDecimatingFactor)
@@ -179,6 +184,14 @@ class SelectionWindow(QtWidgets.QTabWidget):
         self.fs_box.setText(str(self.settings['biosemi']['fs']))
         self.channels_box = QtWidgets.QComboBox()
         self.channels_box.addItems(["A1-B32 (64)", "A1-A32 (32)", "A1-A16 (16)", "A1-A8 (8)"])
+        # I can't think of a good way to do this right now, so here's my terrible solution
+        if "B" in self.settings['biosemi']['channels']:
+            self.channels_box.setCurrentIndex(0)
+        elif self.settings['biosemi']['channels']["A"] == 32:
+            self.channels_box.setCurrentIndex(1)
+        elif self.settings['biosemi']['channels']["A"] == 16:
+            self.channels_box.setCurrentIndex(2)
+        else: self.channels_box.setCurrentIndex(3)
         self.ex_electrodes_box = QtWidgets.QCheckBox()
         self.ex_electrodes_box.setText("8 EX-Electrodes")
         self.ex_electrodes_box.setChecked(self.settings['biosemi']['ex_enabled'])
@@ -305,8 +318,7 @@ class SelectionWindow(QtWidgets.QTabWidget):
 
 
 # GraphWindow currently serves the dual purpose of handling the graph display as well as
-# implementing the plotting logic itself. It might be a good idea to separate the two, 
-# in order to allow creating multiple plot windows if needed.
+# implementing the plotting logic itself. It might be a good idea to separate the two
 class GraphWindow(QtWidgets.QWidget):
     def __init__(self, settings, electrodes_model, freq_bands_model):
         super().__init__()
@@ -316,11 +328,22 @@ class GraphWindow(QtWidgets.QWidget):
         self.welch_enabled = True
         self.is_capturing = False
         self.graph_layout = QtWidgets.QVBoxLayout()
-        # , y_range_controller=LiveAxisRange(fixed_range=[-100, 100])
-        self.plot_widget = LivePlotWidget(title="EEG Channels @ 30Hz")
+        self.plot_widget = LivePlotWidget(title="EEG time-domain plot")
         self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.graph_layout.addWidget(self.plot_widget)
+        self.fft_plot = LivePlotWidget(title="Power spectral density graph")
+        self.fft_plot.setLogMode(True, False)
+        self.fft_plot.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
+        self.graph_layout.addWidget(self.fft_plot)
+        if not self.settings['fft']['welch_enabled']:
+            self.fft_plot.hide()
         self.setLayout(self.graph_layout)
+
+    def toggleFFT(self, checked):
+        if(checked == QtCore.Qt.CheckState.Checked):
+            self.fft_plot.show()
+        else:
+            self.fft_plot.hide()
 
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
@@ -337,18 +360,22 @@ class GraphWindow(QtWidgets.QWidget):
         # Generate plots for time-domain graphing
         for i in range(total_channels-1):
             plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels-1), 0.8, 0.9))
-            self.data_connectors.append(DataConnector(plot, max_points=(fs*1)/self.settings['filter']['decimating_factor'], plot_rate=30))
+            data_connector = DataConnector(plot, max_points=(fs*2)/self.settings['filter']['decimating_factor'], plot_rate=30, ignore_auto_range=True)
+            data_connector.pause()
+            self.data_connectors.append(data_connector)
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
+            plot.hide()
         # Generate plots for FFT graphing. We don't define max_points because we just set the data directly.
         for i in range(total_channels-1):
             plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels-1), 0.8, 0.9))
-            self.data_connectors.append(DataConnector(plot, plot_rate=30))
+            data_connector = DataConnector(plot, plot_rate=30)
+            data_connector.pause()
+            self.data_connectors.append(data_connector)
             self.plots.append(plot)
-            self.plot_widget.addItem(plot)
+            self.fft_plot.addItem(plot)
+            plot.hide()
         self.is_capturing = True
-        if self.settings['fft']['welch_enabled']:
-            self.plot_widget.setLogMode(True, False)
         self.data_thread = Thread(target=self.readData, args=(self.data_connectors,))
         # self.data_thread = QtCore.QThread()
         # worker = DataWorker()
@@ -366,12 +393,19 @@ class GraphWindow(QtWidgets.QWidget):
             connector.deleteLater()
         ## This was causing errors when stopping before FFT deque was full
         ## Possibly because none of the connectors have received data yet?
-        # for plot in self.plots:
-        #     plot.deleteLater()
+        for plot in self.plots:
+            plot.deleteLater()
         self.plot_widget.deleteLater()
-        self.plot_widget = LivePlotWidget(title="EEG Channels @ 30Hz")
+        self.fft_plot.deleteLater()
+        self.plot_widget = LivePlotWidget(title="EEG time-domain plot")
         self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.graph_layout.addWidget(self.plot_widget)
+        self.fft_plot = LivePlotWidget(title="Power spectral density graph")
+        self.fft_plot.setLogMode(True, False)
+        self.fft_plot.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
+        self.graph_layout.addWidget(self.fft_plot)
+        if not self.settings['fft']['welch_enabled']:
+            self.fft_plot.hide()
         if not DEBUG:
             self.sock.close()        
 
@@ -395,7 +429,8 @@ class GraphWindow(QtWidgets.QWidget):
         gain = phys_range/(digi_range * 2**8)
         active_channels = []
         active_reference = -1
-        welch_enabled = self.settings['fft']['welch_enabled']
+        # Forcing this to true for now
+        welch_enabled = True
         welch_window = self.settings['fft']['welch_window']
         welch_buffers = []
         decimate_factor = self.settings['filter']['decimating_factor']
@@ -422,6 +457,12 @@ class GraphWindow(QtWidgets.QWidget):
             idx = self.electrodes_model.index(i,2)
             if self.electrodes_model.itemFromIndex(idx).data():
                 active_reference = i
+        data_connectors[active_channels[0]].ignore_auto_range = False
+        for i in active_channels:
+            self.plots[i].show()
+            self.data_connectors[i].resume()
+            self.plots[i+total_channels].show()
+            self.data_connectors[i+total_channels].resume()
         if DEBUG:
             t = 0 # Used for generating sine signal continuously
         while True:
@@ -486,7 +527,7 @@ class GraphWindow(QtWidgets.QWidget):
                         # Send sample to plot
                         # Rate limited to only check every full set of samples
                         if welch_enabled:
-                            if x % samples == 0:
+                            if x % 512*samples == 0:
                                 if len(welch_buffers[n]) == welch_buffers[n].maxlen:
                                     f, pxx = signal.welch(x=welch_buffers[n], fs=fs, nperseg=welch_window/5)
                                     self.data_connectors[n + (total_channels)].cb_set_data(pxx, f)
@@ -496,7 +537,7 @@ class GraphWindow(QtWidgets.QWidget):
                                             alpha_avg.append(pxx[i])
                                     self.freq_bands_model.setData(self.freq_bands_model.index(2,1), int(sum(alpha_avg)/len(alpha_avg)))
 
-                        elif decimate_enabled:
+                        if decimate_enabled:
                             if zf[n] is None:
                                 zf[n] = signal.lfiltic(b=alias_filter, a=1, y=value)
                                 self.data_connectors[n].cb_append_data_point(value, x/fs)
