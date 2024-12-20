@@ -29,17 +29,20 @@ class SettingsHandler():
         self.settings['fft'] = {}
         self.settings['fft']['welch_enabled'] = False
         self.settings['fft']['welch_window'] = 64*16
+        self.settings['threshold'] = {}
+        self.settings['threshold']['alpha'] = 0.5
 
         try:
             with open(self.file_name, 'r') as file:
                 # Since settings are a dictionary, we update across all "categories" of our settings
                 temp_settings = json.load(file)
-                for k in self.settings.keys():
-                    self.settings[k].update(temp_settings[k])
+                self.settings.update(temp_settings)
+                # for k in self.settings.keys():
+                #     self.settings[k].update(temp_settings[k])
         except FileNotFoundError:
             # Can't read file, so we use defaults
             pass
-        except JSONDecodeError:
+        except ValueError:
             # Settings file is broken, so we ignore it
             pass
 
@@ -100,3 +103,5 @@ class SettingsHandler():
             self.settings['biosemi']['ex_enabled'] = False
             self.settings['biosemi']['channels'].pop('EX', None)
         
+    def setAlphaThreshold(self, value):
+        self.settings['threshold']['alpha'] = float(value)

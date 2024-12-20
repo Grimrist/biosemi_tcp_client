@@ -97,6 +97,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # FFT settings
         self.selection_window.welch_window_box.valueChanged.connect(self.settingsHandler.setWelchWindow)
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.settingsHandler.setWelchEnabled)
+
+        # Thresholds
+        # Just a quick prototype, this needs custom classes
+        self.selection_window.alpha_threshold_box.valueChanged.connect(self.settingsHandler.setAlphaThreshold)
+        self.freq_bands_model.dataChanged.connect(self.selection_window.checkAlphaThreshold)
         ###
 
         # Show window
@@ -122,7 +127,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.freq_bands_model.clear()
         else: 
             data = [[k,0] for k in FREQ_BANDS.keys()]
-            self.freq_bands_model = TableModel(data, ["Bands", "Frequency"])
+            self.freq_bands_model = TableModel(data, ["Bands", "Relative Power"])
 
     def setTotalChannels(self, channels):
         self.settingsHandler.setChannels(channels)
@@ -165,7 +170,7 @@ class SelectionWindow(QtWidgets.QTabWidget):
         super().__init__()
         self.settings = settings
         self.electrodes_model = electrodes_model
-
+        self.freq_bands_model = freq_bands_model
         # Two tabs: one for settings, the other for value monitoring
         ## Settings tab
         settings_window = QtWidgets.QWidget()
@@ -311,12 +316,34 @@ class SelectionWindow(QtWidgets.QTabWidget):
         freq_bands_table = QtWidgets.QTableView()
         freq_bands_table.setModel(freq_bands_model)
         measurements_layout.addWidget(freq_bands_table)
+        
+        # Thresholds
+        threshold_settings = QtWidgets.QWidget()
+        threshold_settings_layout = QtWidgets.QFormLayout()
+        self.alpha_threshold_box = QtWidgets.QDoubleSpinBox()
+        self.alpha_threshold_box.setRange(0, 1)
+        self.alpha_threshold_box.setValue(self.settings['threshold']['alpha'])
+        threshold_settings_layout.addRow(QtWidgets.QLabel("Alpha threshold"), self.alpha_threshold_box)
+        threshold_settings.setLayout(threshold_settings_layout)
+        measurements_layout.addWidget(threshold_settings)
 
+        # TODO: Make this not terrible!! This is just a quick mockup
+        self.alpha_indicator = QtWidgets.QLabel("Alpha under threshold.")
+        measurements_layout.addWidget(self.alpha_indicator)
+        self.alpha_threshold = True
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         measurements_layout.addItem(verticalSpacer) 
         measurements_window.setLayout(measurements_layout)
         self.addTab(measurements_window, "Measurements")
 
+    def checkAlphaThreshold(self, top_left, bottom_right, roles):
+        value = float(self.freq_bands_model.data(top_left).value())
+        if not self.alpha_threshold and value > self.alpha_threshold_box.value():
+            self.alpha_threshold = True
+            self.alpha_indicator.setText("Alpha over threshold!")
+        elif value < self.alpha_threshold_box.value():
+            self.alpha_threshold = False
+            self.alpha_indicator.setText("Alpha under threshold")
 
 # GraphWindow currently serves the dual purpose of handling the graph display as well as
 # implementing the plotting logic itself. It might be a good idea to separate the two
@@ -557,13 +584,14 @@ class GraphWindow(QtWidgets.QWidget):
                             if x % 128*samples == 0:
                                 if len(welch_buffers[n]) == welch_buffers[n].maxlen:
                                     f, pxx = signal.welch(x=welch_buffers[n], fs=fs, nperseg=welch_window/5)
-                                    self.data_connectors[n + (total_channels)].cb_set_data(10*numpy.log10(pxx), f)
-                                    alpha_avg = []
+                                    log_pxx = 10*numpy.log10(pxx)
+                                    self.data_connectors[n + (total_channels)].cb_set_data(log_pxx, f)
+                                    alpha = []
                                     for i, freq in enumerate(f):
                                         if FREQ_BANDS['Alpha'][0] <= freq <= FREQ_BANDS['Alpha'][1]:
-                                            alpha_avg.append(pxx[i])
+                                            alpha.append(pxx[i])
                                     try:
-                                        self.freq_bands_model.setData(self.freq_bands_model.index(2,1), int(sum(alpha_avg)/len(alpha_avg)))
+                                        self.freq_bands_model.setData(self.freq_bands_model.index(2,1), float(sum(alpha)/sum(pxx)))
                                     except ZeroDivisionError:
                                         pass
 

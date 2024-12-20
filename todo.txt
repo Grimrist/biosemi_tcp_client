@@ -6,4 +6,5 @@
 - Implement separate data worker thread so that the thread can terminate itself if needed. 
     - Potentially allow changing which data we're reading in real time.
 - Change aggregator classes (settings, model?) to have accessors so we no longer use direct references
-- Try detecting fft amplitude values
+- Add time scale control to the time plot, as high frequencies become impossible to look at
+- Set up custom classes for QDoubleComboBox in order to provide more useful signals for threshold setup
