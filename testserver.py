@@ -13,6 +13,7 @@ from pglive.sources.data_connector import DataConnector
 from pglive.sources.live_plot import LiveLinePlot
 from pglive.sources.live_plot_widget import LivePlotWidget
 from pglive.sources.live_axis_range import LiveAxisRange
+from pglive.sources.live_axis import LiveAxis
 
 DEBUG = False
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
@@ -335,7 +336,9 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.setLabel('bottom', "Time", "s")
         self.plot_widget.setLabel('left', "Magnitude", "uV")
         self.graph_layout.addWidget(self.plot_widget)
-        self.fft_plot = LivePlotWidget(title="Power spectral density graph")
+        fft_plot_bottom_axis = LiveAxis("bottom", tick_angle=45)
+        fft_plot_left_axis = LiveAxis("left")
+        self.fft_plot = LivePlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
         self.fft_plot.setLogMode(True, False)
         self.fft_plot.getAxis('bottom').enableAutoSIPrefix(False)
         self.fft_plot.getAxis('left').enableAutoSIPrefix(False)
@@ -353,6 +356,10 @@ class GraphWindow(QtWidgets.QWidget):
             self.fft_plot.show()
         else:
             self.fft_plot.hide()
+
+    # Initializes graphs so I don't have to constantly repeat myself
+    def initializeGraphs(self):
+        return
 
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
@@ -413,7 +420,9 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.setLabel('bottom', "Time", "s")
         self.plot_widget.setLabel('left', "Magnitude", "uV")
         self.graph_layout.addWidget(self.plot_widget)
-        self.fft_plot = LivePlotWidget(title="Power spectral density graph")
+        fft_plot_bottom_axis = LiveAxis("bottom", tick_angle=45)
+        fft_plot_left_axis = LiveAxis("left")
+        self.fft_plot = LivePlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
         self.fft_plot.setLogMode(True, False)
         self.fft_plot.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.fft_plot.getAxis('bottom').enableAutoSIPrefix(False)
