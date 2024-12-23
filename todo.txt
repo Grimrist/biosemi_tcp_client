@@ -8,3 +8,4 @@
 - Change aggregator classes (settings, model?) to have accessors so we no longer use direct references
 - Add time scale control to the time plot, as high frequencies become impossible to look at
 - Set up custom classes for QDoubleComboBox in order to provide more useful signals for threshold setup
+- Fix division by zero during runtime (normalization calculation, logarithm)

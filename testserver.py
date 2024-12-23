@@ -328,9 +328,18 @@ class SelectionWindow(QtWidgets.QTabWidget):
         measurements_layout.addWidget(threshold_settings)
 
         # TODO: Make this not terrible!! This is just a quick mockup
+        self.red_icon = QtGui.QPixmap("red_icon.png")
+        self.black_icon = QtGui.QPixmap("black_icon.png")
+        indicator_widget = QtWidgets.QWidget()
+        indicator_layout = QtWidgets.QFormLayout()
         self.alpha_indicator = QtWidgets.QLabel("Alpha under threshold.")
-        measurements_layout.addWidget(self.alpha_indicator)
-        self.alpha_threshold = True
+        self.alpha_indicator_img = QtWidgets.QLabel()
+        self.alpha_indicator_img.setPixmap(self.black_icon)
+        indicator_layout.addRow(self.alpha_indicator_img, self.alpha_indicator)
+        indicator_widget.setLayout(indicator_layout)
+        measurements_layout.addWidget(indicator_widget)
+        self.alpha_threshold = False
+        
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         measurements_layout.addItem(verticalSpacer) 
         measurements_window.setLayout(measurements_layout)
@@ -341,9 +350,11 @@ class SelectionWindow(QtWidgets.QTabWidget):
         if not self.alpha_threshold and value > self.alpha_threshold_box.value():
             self.alpha_threshold = True
             self.alpha_indicator.setText("Alpha over threshold!")
+            self.alpha_indicator_img.setPixmap(self.red_icon)
         elif value < self.alpha_threshold_box.value():
             self.alpha_threshold = False
             self.alpha_indicator.setText("Alpha under threshold")
+            self.alpha_indicator_img.setPixmap(self.black_icon)
 
 # GraphWindow currently serves the dual purpose of handling the graph display as well as
 # implementing the plotting logic itself. It might be a good idea to separate the two
@@ -684,6 +695,27 @@ class TableModel(QtCore.QAbstractTableModel):
     def flags(self, index):
         return QtCore.Qt.ItemFlag.NoItemFlags
 
+# Extending TableModel for our specific purpose of defining thresholds and signals for said thresholds
+# Table must be defined such that there are 4 columns, with the third column being the thresholds, and the fourth being
+# whether the threshold is currently active or not (to prevent emit spam)
+class FreqTableModel(TableModel):
+    thresholdChanged = QtCore.pyqtSignal()
+
+    def __init__(self, data, header):
+        super().__init__()
+
+    def setData(self, index, value, role = QtCore.Qt.ItemDataRole.EditRole):
+        super().setData(index, value, role)
+        if not self.data(index.siblingAtColumn(4)):
+            if value > self.data(index.siblingAtColumn(3), role):
+                thresholdChanged.emit(index, True)
+                self.setData(self.data(index).siblingAtColumn(4), True)
+                return
+        elif value < self.data(index.siblingAtColumn(3), role):
+            thresholdChanged.emit(index, False)
+            self.setData(self.data(index).siblingAtColumn(4), False)
+
+        
 ## Class definition for thread that receives data
 # This was decoupled from the main application as it needed some custom signals for proper termination
 # class DataWorker(QtCore.QObject):
@@ -691,153 +723,6 @@ class TableModel(QtCore.QAbstractTableModel):
 
 #     def __init__(self):
 #         super().__init__()
-#         if not DEBUG:
-#             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#             self.sock.connect((self.settings['socket']['ip'], self.settings['socket']['port']))
-        
-
-#     ##  TCP packet format (2 channels example). Each sample is 24-bits, little-endian.
-#     ##  To convert to a 32-bit integer, we add a 0-byte to the LSB before converting to big-endian.
-#     ##  ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗
-#     ##  ║ C1S1 ║║ C1S1 ║║ C1S1 ║ ║ C2S1 ║║ C2S1 ║║ C2S1 ║ ║ C1S2 ║║ C1S2 ║║ C1S2 ║ ║ C2S2 ║║ C2S2 ║║ C2S2 ║
-#     ##  ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║
-#     ##  ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝
-#     def readData(self, data_connectors, electrodes_model, settings):
-#         x = 0
-#         packet_failed = 0
-#         decimate_enabled = False
-#         # Apply gain based on physical max/min and digital max/min
-#         phys_range = settings['biosemi']['phys_max'] - settings['biosemi']['phys_min']
-#         digi_range = settings['biosemi']['digi_max'] - settings['biosemi']['digi_min']
-#         # Pre-emptively fetch a few values that will be called very often
-#         samples = settings['biosemi']['samples']
-#         fs = settings['biosemi']['fs']
-#         total_channels = electrodes_model.rowCount()
-#         gain = phys_range/(digi_range * 2**8)
-#         active_channels = []
-#         active_reference = -1
-#         welch_enabled = settings['fft']['welch_enabled']
-#         welch_window = settings['fft']['welch_window']
-#         welch_buffers = []
-#         decimate_factor = settings['filter']['decimating_factor']
-#         print("Decimate factor:", decimate_factor)
-#         if decimate_factor > 1: 
-#             decimate_enabled = True
-#             alias_filter = signal.firwin(numtaps=settings['filter']['lowpass_taps'], cutoff=fs/decimate_factor, pass_zero='lowpass', fs=fs)
-#         zf = [None for i in range(len(data_connectors))]
-#         # Generate our buffers for FFT
-#         # We could skip this if FFT is not enabled, but I don't think it 
-#         # slows down regular time graphing too much
-#         for i in range(total_channels):
-#             welch_buffers.append(deque(maxlen=welch_window))
-#         buffer_size = total_channels * settings['biosemi']['samples'] * 3
-#         for i in range(total_channels):
-#             # Select active channels
-#             idx = electrodes_model.index(i,1)
-#             if electrodes_model.itemFromIndex(idx).data(): 
-#                 active_channels.append(i)
-#             # Select reference point
-#             idx = electrodes_model.index(i,2)
-#             if electrodes_model.itemFromIndex(idx).data():
-#                 active_reference = i
-#         if DEBUG:
-#             t = 0 # Used for generating sine signal continuously
-#         while True:
-#             if DEBUG:
-#                 rng = numpy.random.default_rng()
-#                 # data = rng.bytes(buffer_size)
-#                 # Instead of doing random values, let's try generating a 10 [Hz] sine wave with some noise
-#                 data = bytearray()
-#                 lspace = numpy.linspace(t, t+(samples/fs), samples)
-#                 noise_power = 0.00001 * fs/2
-#                 noise = rng.normal(scale=numpy.sqrt(noise_power), size=lspace.shape)
-#                 for j, i in enumerate(lspace):
-#                     for k in range(total_channels):
-#                         val_orig = int((numpy.sin(2 * numpy.pi * 10 * i) + noise[j])*10000) 
-#                         val = (val_orig).to_bytes(3, byteorder='little', signed=True)
-#                         if(len(val) > 3):
-#                             val = val[-3:]
-#                         val_rec = bytearray(1)
-#                         val_rec.append(val[0])
-#                         val_rec.append(val[1])
-#                         val_rec.append(val[2])
-#                         val_rec = int.from_bytes(val, byteorder='little', signed=True)
-#                         if not rng.integers(0, 100) > 50:
-#                             data.extend(val)
-#                 t += samples/fs
-#             else:
-#                 # Read the next packet from the network
-#                 data = sock.recv(buffer_size)
-
-#             # Extract all channel samples from the packet
-#             # We use a try statement as occasionally packet loss messes up the data
-#             try:
-#                 for m in range(samples):
-#                     # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
-#                     if(active_reference > -1):
-#                         ref_offset = (m * 3 * total_channels) + (active_reference*3)
-#                         sample = bytearray(1)
-#                         sample.append(data[ref_offset])
-#                         sample.append(data[ref_offset+1])
-#                         sample.append(data[ref_offset+2])
-#                         ref_value = int.from_bytes(sample, byteorder='little', signed=True)
-#                     else:
-#                         ref_value = 0
-#                     for n in active_channels:
-#                         # Samples are sent in bulk of size SAMPLES, interleaved such that
-#                         # the first sample of each channel is sent, then the second sample,
-#                         # and so on.
-#                         offset = (m * 3 * total_channels) + (n*3)
-#                         # The 3 bytes of each sample arrive in reverse order (little endian).
-#                         # We convert them to a 32bit integer by appending the bytes together,
-#                         # and adding a zero byte as LSB.
-#                         sample = bytearray(1)
-#                         sample.append(data[offset])
-#                         sample.append(data[offset+1])
-#                         sample.append(data[offset+2])
-#                         value = int.from_bytes(sample, byteorder='little', signed=True)
-#                         # Apply reference value and gain
-#                         value = (value - ref_value)*gain
-#                         welch_buffers[n].append(value)
-                        
-#                         # Send sample to plot
-#                         if welch_enabled:
-#                             if len(welch_buffers[n]) == welch_buffers[n].maxlen:
-#                                 f, pxx = signal.welch(x=welch_buffers[n], fs=fs, nperseg=welch_window/5)
-#                                 self.data_connectors[n + (total_channels-1)].cb_set_data(pxx, f)
-#                                 alpha_avg = []
-#                                 for i, freq in enumerate(f):
-#                                     if FREQ_BANDS['Alpha'][0] <= freq <= FREQ_BANDS['Alpha'][1]:
-#                                         alpha_avg.append(pxx[i])
-#                                 self.freq_bands_model.setData(self.freq_bands_model.index(2,1), int(sum(alpha_avg)/len(alpha_avg)))
-
-#                         elif decimate_enabled:
-#                             if zf[n] is None:
-#                                 zf[n] = signal.lfiltic(b=alias_filter, a=1, y=value)
-#                                 self.data_connectors[n].cb_append_data_point(value, x/fs)
-#                             else: 
-#                                 [value], zf[n] = signal.lfilter(b=alias_filter, a=1, x=[value], zi=zf[n])
-
-#                             if x % decimate_factor == 0:
-#                                 self.data_connectors[n].cb_append_data_point(value, x/fs)
-#                         else:
-#                             self.data_connectors[n].cb_append_data_point(value, x/fs)
-
-#                     if not self.is_capturing:
-#                         return
-#                     x += 1
-#                     if DEBUG:
-#                         sleep(1/self.settings['biosemi']['fs'])
-#                 if packet_failed > 0:
-#                     packet_failed -= 1
-                
-#             except IndexError:
-#                 packet_failed += 1
-#                 print("Packet reading failed! Failed attempts:", packet_failed)
-#                 if packet_failed > MAX_ERRORS:
-#                     print("Failed to read packets too many times, dropping connection")
-#                     self.stopCapture()
-#                     return
 
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()
