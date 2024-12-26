@@ -1,11 +1,22 @@
 - Thread seems to die or lock up without any exception, presumably due to a performance issue? Use trace or detect thread termination somehow.
 - Honestly the issue above is just a program structure problem, I need to fix the way the entire data thread works
 - Welch spectrum update rate makes entire system lag -- need to make the whole graphing system more performant
-- Update client to allow switching between FFT and time graph seamlessly
-    - Currently shows both, need to link up button with the hide/show function on the widget
-- Implement separate data worker thread so that the thread can terminate itself if needed. 
-    - Potentially allow changing which data we're reading in real time.
+    - This is mostly a limitation of the library, but I could dynamically respond to low performance by changing the update rate
+- Implement separate data worker thread so that the thread can terminate itself if needed. (done)
+    - Potentially allow changing which data we're reading in real time. (maybe)
 - Change aggregator classes (settings, model?) to have accessors so we no longer use direct references
 - Add time scale control to the time plot, as high frequencies become impossible to look at
+    - pgplot allows writing my own range controller, so I have to look into it
+    - Would be nice if you could just scroll to adjust the size without it breaking the autoscroll
 - Set up custom classes for QDoubleComboBox in order to provide more useful signals for threshold setup
 - Fix division by zero during runtime (normalization calculation, logarithm)
+- Maybe add a debug tab where I can more quickly configure certain values, only shows up with the -d flag on
+- Read tACS manual to determine how to configure and send a signal
+    - Equipment must be switched on before connecting, as undefined currents are output upon switch on
+    - TTL levels
+        - Low: 0-0.4V
+        - High: 2.4-5.25V
+        - Minimum current: 3mA
+    - Level-triggered (not edge)
+    - Active high (high-level triggers stimulation)
+    - Minimum length of trigger: 1ms
