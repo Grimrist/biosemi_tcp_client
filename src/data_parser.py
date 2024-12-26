@@ -1,9 +1,9 @@
 from PyQt6 import QtCore
 from collections import deque
-import numpy
 from scipy import signal
-import global_vars
 from time import sleep
+import numpy
+import global_vars
 
 ## Class definition for thread that receives data
 # This was decoupled from the main application as it needed some custom signals for proper termination

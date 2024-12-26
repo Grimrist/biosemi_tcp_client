@@ -6,7 +6,7 @@ import threading
 from threading import Thread
 from time import sleep
 from collections import deque
-from PyQt6 import QtWidgets, QtCore, QtGui
+from PyQt6 import QtWidgets, QtCore, QtGui, QtTest
 from scipy import signal # Filtering
 import pyqtgraph
 from pglive.sources.data_connector import DataConnector
@@ -14,19 +14,11 @@ from pglive.sources.live_plot import LiveLinePlot
 from pglive.sources.live_plot_widget import LivePlotWidget
 from pglive.sources.live_axis_range import LiveAxisRange
 from pglive.sources.live_axis import LiveAxis
+from data_parser import DataWorker
+import global_vars
 
-DEBUG = False
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
-    DEBUG = True
-
-FREQ_BANDS = {
-    "Delta": [1, 3],
-    "Theta": [4, 7],
-    "Alpha": [8, 12],
-    "Beta": [13, 30],
-    "Gamma": [30, 100]
-}
-MAX_ERRORS = 5
+    global_vars.DEBUG = True
 
 # MainWindow holds all other windows, initializes the settings,
 # and connects every needed signal to its respective slot.
@@ -37,7 +29,7 @@ class MainWindow(QtWidgets.QMainWindow):
                            "QFrame { background-color: #455A64; color: #ffffff }"
                            "QCheckBox { color: #ffffff }"
                            "QCheckBox::indicator::unchecked { background-color: #CFD8DC }"
-                           "QCheckBox::indicator::checked { background-color: #B0BEC5; border-image: url(./check.svg)}"
+                           "QCheckBox::indicator::checked { background-color: #B0BEC5; border-image: url(./icons/check.svg)}"
                            "QLineEdit { background-color: #CFD8DC }"
                            "QScrollBar:vertical { background: #CFD8DC }"
                            "QSpinBox { background: #CFD8DC }"
@@ -51,16 +43,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Load settings
         self.settings = {}
-        self.settingsHandler = SettingsHandler("settings.json", self.settings)
+        self.settings_handler = SettingsHandler("settings.json", self.settings)
         # Initialize main window
         self.setWindowTitle("Biosemi TCP Reader")
         main_widget = QtWidgets.QWidget()
         main_layout = QtWidgets.QHBoxLayout()
         # Initialize models
         self.electrodes_model = None
-        self.initialize_electrodes()
+        self.initializeElectrodes()
         self.freq_bands_model = None
-        self.initialize_bands()
+        self.initializeBands()
 
         # Initialize selection window and graph display window
         self.selection_window = SelectionWindow(self.settings, self.electrodes_model, self.freq_bands_model)
@@ -74,10 +66,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         ### Signal connections
         # Connection settings
-        self.selection_window.ip_box.textChanged.connect(self.settingsHandler.setIp)
-        self.selection_window.port_box.textChanged.connect(self.settingsHandler.setPort)
-        self.selection_window.samples_box.textChanged.connect(self.settingsHandler.setSamples)
-        self.selection_window.fs_box.textChanged.connect(self.settingsHandler.setFs)
+        self.selection_window.ip_box.textChanged.connect(self.settings_handler.setIp)
+        self.selection_window.port_box.textChanged.connect(self.settings_handler.setPort)
+        self.selection_window.samples_box.textChanged.connect(self.settings_handler.setSamples)
+        self.selection_window.fs_box.textChanged.connect(self.settings_handler.setFs)
         self.selection_window.channels_box.currentTextChanged.connect(self.setTotalChannels)
         self.selection_window.ex_electrodes_box.checkStateChanged.connect(self.setExEnabled)
 
@@ -91,17 +83,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.graph_window.toggleFFT)
 
         # Filter settings
-        self.selection_window.decimating_factor_box.valueChanged.connect(self.settingsHandler.setDecimatingFactor)
-        self.selection_window.decimating_taps_box.valueChanged.connect(self.settingsHandler.setLowpassTaps)
+        self.selection_window.decimating_factor_box.valueChanged.connect(self.settings_handler.setDecimatingFactor)
+        self.selection_window.decimating_taps_box.valueChanged.connect(self.settings_handler.setLowpassTaps)
 
         # FFT settings
-        self.selection_window.welch_window_box.valueChanged.connect(self.settingsHandler.setWelchWindow)
-        self.selection_window.fft_checkbox.checkStateChanged.connect(self.settingsHandler.setWelchEnabled)
+        self.selection_window.welch_window_box.valueChanged.connect(self.settings_handler.setWelchWindow)
+        self.selection_window.fft_checkbox.checkStateChanged.connect(self.settings_handler.setWelchEnabled)
 
         # Thresholds
         # Just a quick prototype, this needs custom classes
-        self.selection_window.alpha_threshold_box.valueChanged.connect(self.settingsHandler.setAlphaThreshold)
-        self.freq_bands_model.dataChanged.connect(self.selection_window.checkAlphaThreshold)
+        self.selection_window.alpha_threshold_box.valueChanged.connect(self.settings_handler.setAlphaThreshold)
+        self.selection_window.alpha_threshold_box.valueChanged.connect(self.selection_window.setAlphaThreshold)
+
+        self.freq_bands_model.thresholdChanged.connect(self.selection_window.updateThresholdDisplay)
         ###
 
         # Show window
@@ -109,7 +103,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show()
 
     # Initializes the model that holds the channel and reference selection
-    def initialize_electrodes(self):
+    def initializeElectrodes(self):
         if(self.electrodes_model is not None):
             self.electrodes_model.clear()
         else: self.electrodes_model = QtGui.QStandardItemModel()
@@ -122,20 +116,20 @@ class MainWindow(QtWidgets.QMainWindow):
                 ref_status.setData(QtCore.QVariant(False))
                 self.electrodes_model.appendRow([name, view_status, ref_status])
 
-    def initialize_bands(self):
+    def initializeBands(self):
         if(self.freq_bands_model is not None):
             self.freq_bands_model.clear()
         else: 
-            data = [[k,0] for k in FREQ_BANDS.keys()]
-            self.freq_bands_model = TableModel(data, ["Bands", "Relative Power"])
+            data = [[k,0, 0.5, False] for k in global_vars.FREQ_BANDS.keys()]
+            self.freq_bands_model = FreqTableModel(data, ["Bands", "Relative Power", "Threshold", "Status"])
 
     def setTotalChannels(self, channels):
-        self.settingsHandler.setChannels(channels)
-        self.initialize_electrodes()
+        self.settings_handler.setChannels(channels)
+        self.initializeElectrodes()
 
     def setExEnabled(self, enable):
-        self.settingsHandler.setExEnabled(enable)
-        self.initialize_electrodes()
+        self.settings_handler.setExEnabled(enable)
+        self.initializeElectrodes()
 
     def setActiveChannels(self, selection, deselection):
         for i in deselection.indexes():
@@ -151,14 +145,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.electrodes_model.itemFromIndex(i.siblingAtColumn(2)).setData(QtCore.QVariant(True))
 
     def closeEvent(self, event):
-        self.settingsHandler.saveSettings()
+        self.settings_handler.saveSettings()
         self.graph_window.is_capturing = False
-        # I feel like this isn't a good way to do this, maybe
-        # these members should always exist?
-        if hasattr(self.graph_window, 'data_thread'):
-            self.graph_window.data_thread.join()
-        if hasattr(self.graph_window, 'sock'):
-            self.graph_window.sock.close()
         event.accept()
 
 # SelectionWindow implements all the configuration UI,
@@ -315,6 +303,8 @@ class SelectionWindow(QtWidgets.QTabWidget):
 
         freq_bands_table = QtWidgets.QTableView()
         freq_bands_table.setModel(freq_bands_model)
+        freq_bands_table.setColumnHidden(2, True)
+        freq_bands_table.setColumnHidden(3, True)
         measurements_layout.addWidget(freq_bands_table)
         
         # Thresholds
@@ -327,34 +317,38 @@ class SelectionWindow(QtWidgets.QTabWidget):
         threshold_settings.setLayout(threshold_settings_layout)
         measurements_layout.addWidget(threshold_settings)
 
-        # TODO: Make this not terrible!! This is just a quick mockup
-        self.red_icon = QtGui.QPixmap("red_icon.png")
-        self.black_icon = QtGui.QPixmap("black_icon.png")
+        # TODO: Revisit this eventually, feels like it could be designed better
+        self.red_icon = QtGui.QPixmap("./icons/red_icon.png")
+        self.black_icon = QtGui.QPixmap("./icons/black_icon.png")
         indicator_widget = QtWidgets.QWidget()
         indicator_layout = QtWidgets.QFormLayout()
-        self.alpha_indicator = QtWidgets.QLabel("Alpha under threshold.")
-        self.alpha_indicator_img = QtWidgets.QLabel()
-        self.alpha_indicator_img.setPixmap(self.black_icon)
-        indicator_layout.addRow(self.alpha_indicator_img, self.alpha_indicator)
+        self.band_indicators = []
+        for freq_band in global_vars.FREQ_BANDS.keys():
+            indicator = QtWidgets.QLabel(freq_band + " under threshold.")
+            indicator_img = QtWidgets.QLabel()
+            indicator_img.setPixmap(self.black_icon)
+            indicator_layout.addRow(indicator_img, indicator)
+            self.band_indicators.append((indicator, indicator_img))
         indicator_widget.setLayout(indicator_layout)
         measurements_layout.addWidget(indicator_widget)
-        self.alpha_threshold = False
         
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         measurements_layout.addItem(verticalSpacer) 
         measurements_window.setLayout(measurements_layout)
         self.addTab(measurements_window, "Measurements")
 
-    def checkAlphaThreshold(self, top_left, bottom_right, roles):
-        value = float(self.freq_bands_model.data(top_left).value())
-        if not self.alpha_threshold and value > self.alpha_threshold_box.value():
-            self.alpha_threshold = True
-            self.alpha_indicator.setText("Alpha over threshold!")
-            self.alpha_indicator_img.setPixmap(self.red_icon)
-        elif value < self.alpha_threshold_box.value():
-            self.alpha_threshold = False
-            self.alpha_indicator.setText("Alpha under threshold")
-            self.alpha_indicator_img.setPixmap(self.black_icon)
+    def updateThresholdDisplay(self, index, status):
+        band = self.band_indicators[index.row()][0].text().split()[0]
+        if status == True:
+            self.band_indicators[index.row()][0].setText(band + " over threshold")
+            self.band_indicators[index.row()][1].setPixmap(self.red_icon)
+        else:
+            self.band_indicators[index.row()][0].setText(band + " under threshold")
+            self.band_indicators[index.row()][1].setPixmap(self.black_icon)
+
+    def setAlphaThreshold(self, value):
+        alpha = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, "Alpha")[0]
+        self.freq_bands_model.setData(alpha.siblingAtColumn(2), value)
 
 # GraphWindow currently serves the dual purpose of handling the graph display as well as
 # implementing the plotting logic itself. It might be a good idea to separate the two
@@ -396,17 +390,8 @@ class GraphWindow(QtWidgets.QWidget):
             self.fft_plot.hide()
 
     # Initializes graphs so I don't have to constantly repeat myself
+    # TODO: Actually implement this... been busy running the experiments
     def initializeGraphs(self):
-        return
-
-    # Something is going horribly wrong every time we restart,
-    # so we just go nuclear: delete everything and rebuild.
-    def startCapture(self):
-        if self.is_capturing:
-            self.stopCapture()
-        if not DEBUG:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((self.settings['socket']['ip'], self.settings['socket']['port']))
         total_channels = self.electrodes_model.rowCount()
         fs = self.settings['biosemi']['fs']
         self.data_connectors = []
@@ -429,20 +414,34 @@ class GraphWindow(QtWidgets.QWidget):
             self.plots.append(plot)
             self.fft_plot.addItem(plot)
             plot.hide()
+        return
+
+    # Something is going horribly wrong every time we restart,
+    # so we just go nuclear: delete everything and rebuild.
+    def startCapture(self):
+        if self.is_capturing:
+            self.stopCapture()
+        if not global_vars.DEBUG:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect((self.settings['socket']['ip'], self.settings['socket']['port']))
+        self.initializeGraphs()
         self.is_capturing = True
-        self.data_thread = Thread(target=self.readData, args=(self.data_connectors,))
-        # self.data_thread = QtCore.QThread()
-        # worker = DataWorker()
-        # worker.moveToThread(data_thread)
+
+        # Initialize data worker and thread
+        self.data_thread = QtCore.QThread()
+        self.worker = DataWorker(self.settings, self.electrodes_model, self.freq_bands_model, self.plots, self.data_connectors)
+        self.worker.moveToThread(self.data_thread)
+        self.data_thread.started.connect(self.worker.readData)
+        self.worker.finished.connect(self.data_thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.data_thread.finished.connect(self.data_thread.deleteLater)
         self.data_thread.start()
         print("Reading from ip %s and port %s" % (self.settings['socket']['ip'], self.settings['socket']['port']))
 
     def stopCapture(self):
-        if not self.is_capturing:
+        if not self.worker.is_capturing:
             return
-        self.is_capturing = False
-        if not threading.current_thread() == self.data_thread:
-            self.data_thread.join()
+        self.worker.is_capturing = False
         for connector in self.data_connectors:
             connector.deleteLater()
         ## This was causing errors when stopping before FFT deque was full
@@ -470,169 +469,8 @@ class GraphWindow(QtWidgets.QWidget):
         self.graph_layout.addWidget(self.fft_plot)
         if not self.settings['fft']['welch_enabled']:
             self.fft_plot.hide()
-        if not DEBUG:
+        if not global_vars.DEBUG:
             self.sock.close()        
-
-    ##  TCP packet format (2 channels example). Each sample is 24-bits, little-endian.
-    ##  To convert to a 32-bit integer, we add a 0-byte to the LSB before converting to big-endian.
-    ##  ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗ ╔══════╗╔══════╗╔══════╗
-    ##  ║ C1S1 ║║ C1S1 ║║ C1S1 ║ ║ C2S1 ║║ C2S1 ║║ C2S1 ║ ║ C1S2 ║║ C1S2 ║║ C1S2 ║ ║ C2S2 ║║ C2S2 ║║ C2S2 ║
-    ##  ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║ ║  B1  ║║  B2  ║║  B3  ║
-    ##  ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝ ╚══════╝╚══════╝╚══════╝
-    def readData(self, data_connectors):
-        x = 0
-        packet_failed = 0
-        decimate_enabled = False
-        # Apply gain based on physical max/min and digital max/min
-        phys_range = self.settings['biosemi']['phys_max'] - self.settings['biosemi']['phys_min']
-        digi_range = self.settings['biosemi']['digi_max'] - self.settings['biosemi']['digi_min']
-        # Pre-emptively fetch a few values that will be called very often
-        samples = self.settings['biosemi']['samples']
-        fs = self.settings['biosemi']['fs']
-        total_channels = self.electrodes_model.rowCount()
-        print(phys_range, digi_range)
-        gain = phys_range/(digi_range * 2**8)
-        active_channels = []
-        active_reference = -1
-        # Forcing this to true for now
-        welch_enabled = True
-        welch_window = self.settings['fft']['welch_window']
-        welch_buffers = []
-        decimate_factor = self.settings['filter']['decimating_factor']
-        print("Decimate factor:", decimate_factor)
-        if decimate_factor > 1: 
-            decimate_enabled = True
-            alias_filter = signal.firwin(numtaps=self.settings['filter']['lowpass_taps'], cutoff=fs/decimate_factor, pass_zero='lowpass', fs=fs)
-        zf = [None for i in range(len(data_connectors))]
-        # Generate our buffers for FFT
-        # We could skip this if FFT is not enabled, but I don't think it 
-        # slows down regular time graphing too much
-        for i in range(total_channels):
-            buf = deque(maxlen=welch_window)
-            buf.extend(numpy.zeros(welch_window))
-            welch_buffers.append(buf)
-
-        buffer_size = total_channels * self.settings['biosemi']['samples'] * 3
-        for i in range(total_channels):
-            # Select active channels
-            idx = self.electrodes_model.index(i,1)
-            if self.electrodes_model.itemFromIndex(idx).data(): 
-                active_channels.append(i)
-            # Select reference point
-            idx = self.electrodes_model.index(i,2)
-            if self.electrodes_model.itemFromIndex(idx).data():
-                active_reference = i
-        data_connectors[active_channels[0]].ignore_auto_range = False
-        for i in active_channels:
-            self.plots[i].show()
-            self.data_connectors[i].resume()
-            self.plots[i+total_channels].show()
-            self.data_connectors[i+total_channels].resume()
-        if DEBUG:
-            t = 0 # Used for generating sine signal continuously
-        while True:
-            if DEBUG:
-                rng = numpy.random.default_rng()
-                # data = rng.bytes(buffer_size)
-                # Instead of doing random values, let's try generating a 10 [Hz] sine wave with some noise
-                data = bytearray()
-                lspace = numpy.linspace(t, t+(samples/fs), samples)
-                noise_power = 0.00001 * fs/2
-                noise = rng.normal(scale=numpy.sqrt(noise_power), size=lspace.shape)
-                for j, i in enumerate(lspace):
-                    for k in range(total_channels):
-                        if t > 15: val_orig = int((numpy.sin(2 * numpy.pi * 100 * i) + noise[j])*10000) 
-                        else: val_orig = int((numpy.sin(2 * numpy.pi * 10 * i) + noise[j])*10000) 
-                        val = (val_orig).to_bytes(3, byteorder='little', signed=True)
-                        if(len(val) > 3):
-                            val = val[-3:]
-                        val_rec = bytearray(1)
-                        val_rec.append(val[0])
-                        val_rec.append(val[1])
-                        val_rec.append(val[2])
-                        val_rec = int.from_bytes(val, byteorder='little', signed=True)
-                        # if not rng.integers(0, 100) > 50:
-                        data.extend(val)
-                t += samples/fs
-            else:
-                # Read the next packet from the network
-                data = self.sock.recv(buffer_size)
-
-            # Extract all channel samples from the packet
-            # We use a try statement as occasionally packet loss messes up the data
-            try:
-                for m in range(samples):
-                    # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
-                    if(active_reference > -1):
-                        ref_offset = (m * 3 * total_channels) + (active_reference*3)
-                        sample = bytearray(1)
-                        sample.append(data[ref_offset])
-                        sample.append(data[ref_offset+1])
-                        sample.append(data[ref_offset+2])
-                        ref_value = int.from_bytes(sample, byteorder='little', signed=True)
-                    else:
-                        ref_value = 0
-                    for n in active_channels:
-                        # Samples are sent in bulk of size SAMPLES, interleaved such that
-                        # the first sample of each channel is sent, then the second sample,
-                        # and so on.
-                        offset = (m * 3 * total_channels) + (n*3)
-                        # The 3 bytes of each sample arrive in reverse order (little endian).
-                        # We convert them to a 32bit integer by appending the bytes together,
-                        # and adding a zero byte as LSB.
-                        sample = bytearray(1)
-                        sample.append(data[offset])
-                        sample.append(data[offset+1])
-                        sample.append(data[offset+2])
-                        value = int.from_bytes(sample, byteorder='little', signed=True)
-                        # Apply reference value and gain
-                        value = (value - ref_value)*gain
-                        welch_buffers[n].append(value)
-                        
-                        # Send sample to plot
-                        # Rate limited to only check every full set of samples
-                        if welch_enabled:
-                            if x % 128*samples == 0:
-                                if len(welch_buffers[n]) == welch_buffers[n].maxlen:
-                                    f, pxx = signal.welch(x=welch_buffers[n], fs=fs, nperseg=welch_window/5)
-                                    log_pxx = 10*numpy.log10(pxx)
-                                    self.data_connectors[n + (total_channels)].cb_set_data(log_pxx, f)
-                                    alpha = []
-                                    for i, freq in enumerate(f):
-                                        if FREQ_BANDS['Alpha'][0] <= freq <= FREQ_BANDS['Alpha'][1]:
-                                            alpha.append(pxx[i])
-                                    try:
-                                        self.freq_bands_model.setData(self.freq_bands_model.index(2,1), float(sum(alpha)/sum(pxx)))
-                                    except ZeroDivisionError:
-                                        pass
-
-                        if decimate_enabled:
-                            if zf[n] is None:
-                                zf[n] = signal.lfiltic(b=alias_filter, a=1, y=value)
-                                self.data_connectors[n].cb_append_data_point(value, x/fs)
-                            else: 
-                                [value], zf[n] = signal.lfilter(b=alias_filter, a=1, x=[value], zi=zf[n])
-                            if x % decimate_factor == 0:
-                                self.data_connectors[n].cb_append_data_point(value, x/fs)
-                        else:
-                            self.data_connectors[n].cb_append_data_point(value, x/fs)
-
-                    if not self.is_capturing:
-                        return
-                    x += 1
-                    if DEBUG:
-                        sleep(1/self.settings['biosemi']['fs'])
-                if packet_failed > 0:
-                    packet_failed -= 1
-                
-            except IndexError:
-                packet_failed += 1
-                print("Packet reading failed! Failed attempts:", packet_failed)
-                if packet_failed > MAX_ERRORS:
-                    print("Failed to read packets too many times, dropping connection")
-                    #self.stopCapture()
-                    return
-                
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):
@@ -699,30 +537,21 @@ class TableModel(QtCore.QAbstractTableModel):
 # Table must be defined such that there are 4 columns, with the third column being the thresholds, and the fourth being
 # whether the threshold is currently active or not (to prevent emit spam)
 class FreqTableModel(TableModel):
-    thresholdChanged = QtCore.pyqtSignal()
+    thresholdChanged = QtCore.pyqtSignal(QtCore.QModelIndex, bool)
 
     def __init__(self, data, header):
-        super().__init__()
+        super().__init__(data, header)
 
-    def setData(self, index, value, role = QtCore.Qt.ItemDataRole.EditRole):
-        super().setData(index, value, role)
-        if not self.data(index.siblingAtColumn(4)):
-            if value > self.data(index.siblingAtColumn(3), role):
-                thresholdChanged.emit(index, True)
-                self.setData(self.data(index).siblingAtColumn(4), True)
+    def setValue(self, index, value, role = QtCore.Qt.ItemDataRole.EditRole):
+        self.setData(index, value, role)
+        if not self.data(index.siblingAtColumn(3)).value():
+            if value > self.data(index.siblingAtColumn(2)).value():
+                self.thresholdChanged.emit(index, True)
+                self.setData(index.siblingAtColumn(3), True)
                 return
-        elif value < self.data(index.siblingAtColumn(3), role):
-            thresholdChanged.emit(index, False)
-            self.setData(self.data(index).siblingAtColumn(4), False)
-
-        
-## Class definition for thread that receives data
-# This was decoupled from the main application as it needed some custom signals for proper termination
-# class DataWorker(QtCore.QObject):
-#     finished = QtCore.pyqtSignal()
-
-#     def __init__(self):
-#         super().__init__()
+        elif value < self.data(index.siblingAtColumn(2)).value():
+            self.thresholdChanged.emit(index, False)
+            self.setData(index.siblingAtColumn(3), False)
 
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()

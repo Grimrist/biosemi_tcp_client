@@ -1,2 +1,6 @@
 settings.json
 __pycache__/
+.vscode/
+watermelon_test.txt
+run_debug
+profile_result
