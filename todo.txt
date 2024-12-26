@@ -8,7 +8,6 @@
 - Add time scale control to the time plot, as high frequencies become impossible to look at
     - pgplot allows writing my own range controller, so I have to look into it
     - Would be nice if you could just scroll to adjust the size without it breaking the autoscroll
-- Set up custom classes for QDoubleComboBox in order to provide more useful signals for threshold setup
 - Fix division by zero during runtime (normalization calculation, logarithm)
 - Maybe add a debug tab where I can more quickly configure certain values, only shows up with the -d flag on
 - Read tACS manual to determine how to configure and send a signal

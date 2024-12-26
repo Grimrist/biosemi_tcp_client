@@ -361,6 +361,19 @@ class GraphWindow(QtWidgets.QWidget):
         self.welch_enabled = True
         self.is_capturing = False
         self.graph_layout = QtWidgets.QVBoxLayout()
+        self.initializePlotWidgets()
+        if not self.settings['fft']['welch_enabled']:
+            self.fft_plot.hide()
+        self.setLayout(self.graph_layout)
+
+    def toggleFFT(self, checked):
+        if(checked == QtCore.Qt.CheckState.Checked):
+            self.fft_plot.show()
+        else:
+            self.fft_plot.hide()
+
+    # Initializes the plot widgets, alongside their axis configuration
+    def initializePlotWidgets(self):
         self.plot_widget = LivePlotWidget(title="EEG time-domain plot")
         self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
@@ -379,18 +392,8 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_plot.getAxis('bottom').setStyle(tickTextWidth=1)
         self.fft_plot.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.graph_layout.addWidget(self.fft_plot)
-        if not self.settings['fft']['welch_enabled']:
-            self.fft_plot.hide()
-        self.setLayout(self.graph_layout)
-
-    def toggleFFT(self, checked):
-        if(checked == QtCore.Qt.CheckState.Checked):
-            self.fft_plot.show()
-        else:
-            self.fft_plot.hide()
 
     # Initializes graphs so I don't have to constantly repeat myself
-    # TODO: Actually implement this... been busy running the experiments
     def initializeGraphs(self):
         total_channels = self.electrodes_model.rowCount()
         fs = self.settings['biosemi']['fs']
@@ -450,23 +453,7 @@ class GraphWindow(QtWidgets.QWidget):
             plot.deleteLater()
         self.plot_widget.deleteLater()
         self.fft_plot.deleteLater()
-        self.plot_widget = LivePlotWidget(title="EEG time-domain plot")
-        self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
-        self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
-        self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
-        self.plot_widget.setLabel('bottom', "Time", "s")
-        self.plot_widget.setLabel('left', "Magnitude", "uV")
-        self.graph_layout.addWidget(self.plot_widget)
-        fft_plot_bottom_axis = LiveAxis("bottom", tick_angle=45)
-        fft_plot_left_axis = LiveAxis("left")
-        self.fft_plot = LivePlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
-        self.fft_plot.setLogMode(True, False)
-        self.fft_plot.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
-        self.fft_plot.getAxis('bottom').enableAutoSIPrefix(False)
-        self.fft_plot.getAxis('left').enableAutoSIPrefix(False)
-        self.fft_plot.setLabel('bottom', "Frequency", "Hz")
-        self.fft_plot.setLabel('left', "Power", "dB")
-        self.graph_layout.addWidget(self.fft_plot)
+        self.initializePlotWidgets()
         if not self.settings['fft']['welch_enabled']:
             self.fft_plot.hide()
         if not global_vars.DEBUG:
