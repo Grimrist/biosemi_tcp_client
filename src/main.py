@@ -1,13 +1,7 @@
-import numpy
 import socket   # used for TCP/IP communication
-from settings import SettingsHandler
+from settings import SettingsHandler    
 import sys
-import threading
-from threading import Thread
-from time import sleep
-from collections import deque
-from PyQt6 import QtWidgets, QtCore, QtGui, QtTest
-from scipy import signal # Filtering
+from PyQt6 import QtWidgets, QtCore, QtGui
 import pyqtgraph
 from pglive.sources.data_connector import DataConnector
 from pglive.sources.live_plot import LiveLinePlot
@@ -15,6 +9,7 @@ from pglive.sources.live_plot_widget import LivePlotWidget
 from pglive.sources.live_axis_range import LiveAxisRange
 from pglive.sources.live_axis import LiveAxis
 from data_parser import DataWorker
+from customliveplot import CustomLivePlotWidget
 import global_vars
 
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
@@ -104,7 +99,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # Initializes the model that holds the channel and reference selection
     def initializeElectrodes(self):
-        if(self.electrodes_model is not None):
+        if self.electrodes_model is not None:
             self.electrodes_model.clear()
         else: self.electrodes_model = QtGui.QStandardItemModel()
         for (group, number) in self.settings['biosemi']['channels'].items():
@@ -117,7 +112,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.electrodes_model.appendRow([name, view_status, ref_status])
 
     def initializeBands(self):
-        if(self.freq_bands_model is not None):
+        if self.freq_bands_model is not None:
             self.freq_bands_model.clear()
         else: 
             data = [[k,0, 0.5, False] for k in global_vars.FREQ_BANDS.keys()]
@@ -146,7 +141,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, event):
         self.settings_handler.saveSettings()
-        self.graph_window.is_capturing = False
+        self.graph_window.stopCapture()
         event.accept()
 
 # SelectionWindow implements all the configuration UI,
@@ -374,7 +369,7 @@ class GraphWindow(QtWidgets.QWidget):
 
     # Initializes the plot widgets, alongside their axis configuration
     def initializePlotWidgets(self):
-        self.plot_widget = LivePlotWidget(title="EEG time-domain plot")
+        self.plot_widget = CustomLivePlotWidget(title="EEG time-domain plot")
         self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
@@ -442,13 +437,12 @@ class GraphWindow(QtWidgets.QWidget):
         print("Reading from ip %s and port %s" % (self.settings['socket']['ip'], self.settings['socket']['port']))
 
     def stopCapture(self):
-        if not self.worker.is_capturing:
+        if not self.is_capturing:
             return
         self.worker.is_capturing = False
+        self.is_capturing = False
         for connector in self.data_connectors:
             connector.deleteLater()
-        ## This was causing errors when stopping before FFT deque was full
-        ## Possibly because none of the connectors have received data yet?
         for plot in self.plots:
             plot.deleteLater()
         self.plot_widget.deleteLater()
@@ -475,7 +469,6 @@ class SingleSelectQListView(QtWidgets.QListView):
 # For some reason, there's no existing implementation for this interface,
 # so we make our own, even though it really doesn't need to do anything fancy.
 # Currently designed as an array and can't be expanded after initialization. 
-# Wouldn't be too difficult to extend later.
 class TableModel(QtCore.QAbstractTableModel):
     def __init__(self, data, header):
         super().__init__()
@@ -510,7 +503,6 @@ class TableModel(QtCore.QAbstractTableModel):
             return True
         return False
 
-    # Just ignoring orientation for now, as well as role
     def headerData(self, section, orientation, role = QtCore.Qt.ItemDataRole.DisplayRole):
         if orientation == QtCore.Qt.Orientation.Horizontal and role == QtCore.Qt.ItemDataRole.DisplayRole:
             return QtCore.QVariant(self._header[section])

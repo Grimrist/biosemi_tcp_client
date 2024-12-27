@@ -6,7 +6,7 @@
     - Potentially allow changing which data we're reading in real time. (maybe)
 - Change aggregator classes (settings, model?) to have accessors so we no longer use direct references
 - Add time scale control to the time plot, as high frequencies become impossible to look at
-    - pgplot allows writing my own range controller, so I have to look into it
+    - pglive allows writing my own range controller, so I have to look into it
     - Would be nice if you could just scroll to adjust the size without it breaking the autoscroll
 - Fix division by zero during runtime (normalization calculation, logarithm)
 - Maybe add a debug tab where I can more quickly configure certain values, only shows up with the -d flag on
@@ -19,3 +19,5 @@
     - Level-triggered (not edge)
     - Active high (high-level triggers stimulation)
     - Minimum length of trigger: 1ms
+
+- Add a controller for the thread to prevent most of the messiness of starting and stopping capture

@@ -105,3 +105,4 @@ class SettingsHandler():
         
     def setAlphaThreshold(self, value):
         self.settings['threshold']['alpha'] = float(value)
+        

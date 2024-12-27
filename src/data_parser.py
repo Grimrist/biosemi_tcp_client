@@ -52,8 +52,12 @@ class DataWorker(QtCore.QObject):
         welch_enabled = True
         welch_window = self.settings['fft']['welch_window']
         welch_buffers = []
+        # We're seeking a 45 Hz update rate for the plots right now, so we calculate
+        # how often we need to update in terms of samples received
+        update_rate = int(self.fs/45)
+        print("Update rate in samples:", update_rate)
+
         decimate_factor = self.settings['filter']['decimating_factor']
-        print("Decimate factor:", decimate_factor)
         if decimate_factor > 1: 
             decimate_enabled = True
             alias_filter = signal.firwin(numtaps=self.settings['filter']['lowpass_taps'], cutoff=self.fs/decimate_factor, pass_zero='lowpass', fs=self.fs)
@@ -93,7 +97,7 @@ class DataWorker(QtCore.QObject):
                 noise_power = 0.00001 * self.fs/2
                 noise = rng.normal(scale=numpy.sqrt(noise_power), size=lspace.shape)
                 for j, i in enumerate(lspace):
-                    for k in range(total_channels):
+                    for _ in range(total_channels):
                         if t > 2: val_orig = int((numpy.sin(2 * numpy.pi * 100 * i) + noise[j])*100) 
                         else: val_orig = int((numpy.sin(2 * numpy.pi * 10 * i) + noise[j])*10000) 
                         val = (val_orig).to_bytes(3, byteorder='little', signed=True)
@@ -144,7 +148,7 @@ class DataWorker(QtCore.QObject):
                         # Send sample to plot
                         # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                         if welch_enabled:
-                            if x % 128*self.samples == 0:
+                            if x % update_rate == 0:
                                 if len(welch_buffers[n]) == welch_buffers[n].maxlen:
                                     f, pxx = signal.welch(x=welch_buffers[n], fs=self.fs, nperseg=welch_window/5)
                                     values = numpy.stack((f, pxx))
