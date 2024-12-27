@@ -9,7 +9,7 @@ from pglive.sources.live_plot_widget import LivePlotWidget
 from pglive.sources.live_axis_range import LiveAxisRange
 from pglive.sources.live_axis import LiveAxis
 from data_parser import DataWorker
-from customliveplot import CustomLivePlotWidget
+from custom_live_plot import CustomLivePlotWidget
 import global_vars
 
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
@@ -278,7 +278,6 @@ class SelectionWindow(QtWidgets.QTabWidget):
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         selection_layout.addItem(verticalSpacer) 
 
-
         # Control buttons
         button_widget = QtWidgets.QWidget()
         button_layout = QtWidgets.QHBoxLayout()
@@ -355,6 +354,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.freq_bands_model = freq_bands_model
         self.welch_enabled = True
         self.is_capturing = False
+        self.restart_queued = False
         self.graph_layout = QtWidgets.QVBoxLayout()
         self.initializePlotWidgets()
         if not self.settings['fft']['welch_enabled']:
@@ -417,29 +417,19 @@ class GraphWindow(QtWidgets.QWidget):
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
     def startCapture(self):
-        if self.is_capturing:
+        if not self.is_capturing:
+            self.initializeGraphs()
+            self.initializeWorker()
+        else:
+            self.restart_queued = True
             self.stopCapture()
-        if not global_vars.DEBUG:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((self.settings['socket']['ip'], self.settings['socket']['port']))
-        self.initializeGraphs()
-        self.is_capturing = True
-
-        # Initialize data worker and thread
-        self.data_thread = QtCore.QThread()
-        self.worker = DataWorker(self.settings, self.electrodes_model, self.freq_bands_model, self.plots, self.data_connectors)
-        self.worker.moveToThread(self.data_thread)
-        self.data_thread.started.connect(self.worker.readData)
-        self.worker.finished.connect(self.data_thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.data_thread.finished.connect(self.data_thread.deleteLater)
-        self.data_thread.start()
-        print("Reading from ip %s and port %s" % (self.settings['socket']['ip'], self.settings['socket']['port']))
 
     def stopCapture(self):
         if not self.is_capturing:
             return
-        self.worker.is_capturing = False
+        self.worker.terminate()
+
+    def cleanup(self):
         self.is_capturing = False
         for connector in self.data_connectors:
             connector.deleteLater()
@@ -451,7 +441,26 @@ class GraphWindow(QtWidgets.QWidget):
         if not self.settings['fft']['welch_enabled']:
             self.fft_plot.hide()
         if not global_vars.DEBUG:
-            self.sock.close()        
+            self.sock.close()
+        if self.restart_queued:
+            self.initializeGraphs()
+            self.initializeWorker()
+
+    # Initialize data worker and thread
+    def initializeWorker(self):
+        self.data_thread = QtCore.QThread()
+        self.worker = DataWorker(self.settings, self.electrodes_model, self.freq_bands_model, self.plots, self.data_connectors)
+        self.worker.moveToThread(self.data_thread)
+        self.data_thread.started.connect(self.worker.readData)
+        self.worker.finished.connect(self.data_thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.data_thread.finished.connect(self.data_thread.deleteLater)
+        self.data_thread.finished.connect(self.cleanup)
+        self.data_thread.start()
+        print("Reading from ip %s and port %s" % (self.settings['socket']['ip'], self.settings['socket']['port']))
+        self.is_capturing = True
+        self.restart_queued = False
+
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):

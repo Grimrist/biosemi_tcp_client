@@ -5,6 +5,8 @@ from time import sleep
 import numpy
 import global_vars
 
+## Controller for the worker so we don't hang the thread when we need stuff to happen
+
 ## Class definition for thread that receives data
 # This was decoupled from the main application as it needed some custom signals for proper termination
 class DataWorker(QtCore.QObject):
@@ -36,6 +38,9 @@ class DataWorker(QtCore.QObject):
     def startSocket(self, ip, port):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((ip, port))
+
+    def terminate(self):
+        self.is_capturing = False
 
     def readData(self):
         if not global_vars.DEBUG:
