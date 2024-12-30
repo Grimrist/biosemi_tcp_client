@@ -68,8 +68,8 @@ class DataWorker(QtCore.QObject):
         welch_buffers = []
         # We're seeking a 45 Hz update rate for the plots right now, so we calculate
         # how often we need to update in terms of samples received
-        update_rate = int(self.fs/45)
-        print("Update rate in samples:", update_rate)
+        update_rate = int(numpy.ceil(self.fs / 45 / self.samples))
+        print("Update rate in packet count (aiming for 45 Hz):", update_rate)
 
         decimate_factor = self.settings['filter']['decimating_factor']
         if decimate_factor > 1: 
@@ -80,9 +80,10 @@ class DataWorker(QtCore.QObject):
         # We could skip this if FFT is not enabled, but I don't think it slows down regular time graphing too much
         for i in range(total_channels):
             buf = deque(maxlen=welch_window)
-            buf.append(numpy.zeros(welch_window))
+            buf.extend(numpy.zeros(welch_window))
             welch_buffers.append(buf)
 
+        # Determine which channels we're interested in reading from
         for i in range(total_channels):
             # Select active channels
             idx = self.electrodes_model.index(i,1)
@@ -92,6 +93,8 @@ class DataWorker(QtCore.QObject):
             idx = self.electrodes_model.index(i,2)
             if self.electrodes_model.itemFromIndex(idx).data():
                 active_reference = i
+                
+        # Enable connectors that we will be using
         self.data_connectors[active_channels[0]].ignore_auto_range = False
         for i in active_channels:
             self.plots[i].show()
@@ -130,7 +133,6 @@ class DataWorker(QtCore.QObject):
                 if(active_reference > -1):
                     ref_values = data[n::total_channels]
                     ref_values = numpy.fromiter((int.from_bytes(data[idx:idx+3], 'little', signed=True) for idx in range(0,self.samples*3,3)), dtype=numpy.int32, count=self.samples)
-                    print(ref_values)
                 else:
                     ref_values = numpy.zeros(self.samples)
                 
@@ -138,7 +140,8 @@ class DataWorker(QtCore.QObject):
                     # Each data packet comes with multiple 3-byte samples at a time, interleaved such that
                     # the first sample of each channel is sent, then the second sample, and so on.
                     # We de-interleave the data to keep only the channels we care about.
-                    samples_bytes = [data[idx:idx+3] for idx in range(n*3,buffer_size,total_channels)]
+                    samples_bytes = [data[idx:idx+3] for idx in range(n*3,buffer_size,total_channels+1)]
+
                     # The 3 bytes of each sample are formatted in little endian.
                     # We convert them to a 32bit integer, which automatically appends a zero to the LSB,
                     # to retain the signedness of the value.
@@ -146,28 +149,25 @@ class DataWorker(QtCore.QObject):
                     
                     # We apply the reference value and gain
                     samples = (samples - ref_values)*self.gain
-                    welch_buffers[n].append(samples)
-
+                    welch_buffers[n].extend(samples)
                     # Send sample to plot
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                     # Since we're working with an entire set of samples, we need the corresponding x values
                     samples_time = numpy.linspace(x/self.fs, (x+self.samples)/self.fs, num=self.samples)
                     if welch_enabled:
                         if x % update_rate == 0:
-                            if len(welch_buffers[n]) == welch_buffers[n].maxlen:
-                                f, pxx = signal.welch(x=welch_buffers[n], fs=self.fs, nperseg=welch_window/5)
-                                values = numpy.stack((f, pxx))
-                                log_pxx = 10*numpy.log10(pxx)
-                                self.data_connectors[n + (total_channels)].cb_set_data(log_pxx, f)
-                                for band, [lower, upper] in global_vars.FREQ_BANDS.items():
-                                    freq_filter = (values[0, :] >= lower) & (values[0, :] <= upper)
-                                    band_values = values[1, freq_filter]
-                                    idx = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, band)[0]
-                                    try:
-                                        self.freq_bands_model.setValue(idx.siblingAtColumn(1), float(numpy.sum(band_values)/numpy.sum(pxx)))
-                                    except ZeroDivisionError:
-                                        pass
-
+                            f, pxx = signal.welch(x=welch_buffers[n], fs=self.fs, nperseg=welch_window/5)
+                            values = numpy.stack((f, pxx))
+                            log_pxx = 10*numpy.log10(pxx)
+                            self.data_connectors[n + (total_channels)].cb_set_data(log_pxx, f)
+                            for band, [lower, upper] in global_vars.FREQ_BANDS.items():
+                                freq_filter = (values[0, :] >= lower) & (values[0, :] <= upper)
+                                band_values = values[1, freq_filter]
+                                idx = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, band)[0]
+                                try:
+                                    self.freq_bands_model.setValue(idx.siblingAtColumn(1), float(numpy.sum(band_values)/numpy.sum(pxx)))
+                                except ZeroDivisionError:
+                                    pass
                     if decimate_enabled:
                         if zf[n] is None:
                             zf[n] = signal.lfiltic(b=alias_filter, a=1, y=samples[0])
