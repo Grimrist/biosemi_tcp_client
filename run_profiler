@@ -1,0 +1,4 @@
+#!/bin/bash
+
+source ../biosemi-venv/bin/activate
+python -m cProfile -s cumtime ./src/main.py -d > profiler_results

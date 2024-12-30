@@ -67,17 +67,18 @@ class CustomLivePlotWidget(LivePlotWidget):
         else:
             super().mouseMoveEvent(ev)
     
-    # Fix auto-adjust button to not break the x-axis auto scrolling
-    # We request the live axis to tell us what range we need to display the entire signal
+    # Fix auto-adjust button to not break the x-axis auto scrolling. Now it just restores the original auto-scale functionality
     def auto_btn_clicked(self):
-        new_range = self.y_range_controller.get_max_y_range()
-        print(new_range)
-        self.y_range_controller.set_fixed_range(new_range)
+        ## Restore this if it's a more desired behavior to disable the auto scaling and fit curve to screen
+        # new_range = self.y_range_controller.get_max_y_range()
+        # print(new_range)
+        # self.y_range_controller.set_fixed_range(new_range)
+        self.y_range_controller.set_fixed_range(None)
+        self.manual_range = False
 
     def wheelEvent(self, ev):
         [ymin,ymax] = self.final_y_range
         dist = abs(ymax - ymin)
-        print("Center: ", ymin + (ymax - ymin)/2)
         new_range = [ymin - dist * (30/ev.angleDelta().y()), ymax + dist * (30/ev.angleDelta().y())]
         self.y_range_controller.set_fixed_range(new_range)
 

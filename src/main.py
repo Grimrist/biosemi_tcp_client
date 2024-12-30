@@ -8,9 +8,12 @@ from pglive.sources.live_plot import LiveLinePlot
 from pglive.sources.live_plot_widget import LivePlotWidget
 from pglive.sources.live_axis_range import LiveAxisRange
 from pglive.sources.live_axis import LiveAxis
+import serial
+
 from data_parser import DataWorker
 from custom_live_plot import CustomLivePlotWidget
 import global_vars
+
 
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
     global_vars.DEBUG = True
@@ -151,6 +154,7 @@ class MainWindow(QtWidgets.QMainWindow):
 class SelectionWindow(QtWidgets.QTabWidget):
     def __init__(self, settings, electrodes_model, freq_bands_model):
         super().__init__()
+        self.initializeSerial()
         self.settings = settings
         self.electrodes_model = electrodes_model
         self.freq_bands_model = freq_bands_model
@@ -340,6 +344,19 @@ class SelectionWindow(QtWidgets.QTabWidget):
             self.band_indicators[index.row()][0].setText(band + " under threshold")
             self.band_indicators[index.row()][1].setPixmap(self.black_icon)
 
+        ## Temporary placement, this might need its own thread
+        if self.serial_port.is_open:
+            if status:
+                self.serial_port.write(bytes(band + " over threshold\n", 'ascii'))
+            else:
+                self.serial_port.write(bytes(band + " under threshold\n", 'ascii'))
+
+    def initializeSerial(self):
+        try:
+            self.serial_port = serial.Serial('/dev/ttyUSB0', 115200)
+        except serial.serialutil.SerialException:
+            self.serial_port = serial.Serial()
+
     def setAlphaThreshold(self, value):
         alpha = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, "Alpha")[0]
         self.freq_bands_model.setData(alpha.siblingAtColumn(2), value)
@@ -378,7 +395,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.graph_layout.addWidget(self.plot_widget)
         fft_plot_bottom_axis = LiveAxis("bottom", tick_angle=45)
         fft_plot_left_axis = LiveAxis("left")
-        self.fft_plot = LivePlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
+        self.fft_plot = CustomLivePlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
         self.fft_plot.setLogMode(True, False)
         self.fft_plot.getAxis('bottom').enableAutoSIPrefix(False)
         self.fft_plot.getAxis('left').enableAutoSIPrefix(False)
