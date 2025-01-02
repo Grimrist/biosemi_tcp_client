@@ -3,6 +3,11 @@ from settings import SettingsHandler
 import sys
 from PyQt6 import QtWidgets, QtCore, QtGui
 import pyqtgraph
+try:
+    import cupy
+    pyqtgraph.setConfigOptions(useCupy=true)
+except:
+    pass
 from pglive.sources.data_connector import DataConnector
 from pglive.sources.live_plot import LiveLinePlot
 from pglive.sources.live_plot_widget import LivePlotWidget
@@ -414,7 +419,7 @@ class GraphWindow(QtWidgets.QWidget):
         # Generate plots for time-domain graphing
         for i in range(total_channels):
             plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9))
-            data_connector = DataConnector(plot, max_points=(fs*2)/self.settings['filter']['decimating_factor'], plot_rate=30, ignore_auto_range=True)
+            data_connector = DataConnector(plot, max_points=(fs*2)/self.settings['filter']['decimating_factor'], plot_rate=45, ignore_auto_range=True)
             data_connector.pause()
             self.data_connectors.append(data_connector)
             self.plots.append(plot)
@@ -423,7 +428,7 @@ class GraphWindow(QtWidgets.QWidget):
         # Generate plots for FFT graphing. We don't define max_points because we just set the data directly.
         for i in range(total_channels):
             plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9))
-            data_connector = DataConnector(plot, plot_rate=30)
+            data_connector = DataConnector(plot, plot_rate=45)
             data_connector.pause()
             self.data_connectors.append(data_connector)
             self.plots.append(plot)

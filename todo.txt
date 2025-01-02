@@ -4,6 +4,7 @@
 - Change aggregator classes (settings, model?) to have accessors so we no longer use direct references
 - Fix division by zero during runtime (normalization calculation, logarithm)
 - Maybe add a debug tab where I can more quickly configure certain values, only shows up with the -d flag on
+    - I added a debug thread, so this should be much easier to implement via slots
 - Read tACS manual to determine how to configure and send a signal
     - Equipment must be switched on before connecting, as undefined currents are output upon switch on
     - TTL levels

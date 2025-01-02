@@ -1,18 +1,19 @@
 from PyQt6 import QtCore
 from collections import deque
-# try:
-#     import numpy
-#     from cupyx.scipy import signal
-#     import cupyx.scipy.fft as cufft
-#     from scipy import fft
-#     fft.set_global_backend(cufft)
-# except ImportError: 
-import numpy
-from scipy import signal, fft
-    # pass
 
-from time import sleep
+try:
+    import numpy
+    from cupyx.scipy import signal
+    import cupyx.scipy.fft as cufft
+    from scipy import fft
+    fft.set_global_backend(cufft)
+    cuda_enabled = True
+except ImportError: 
+    import numpy
+    from scipy import signal, fft
+
 import global_vars
+from time import sleep
 import threading
 import struct
 import socket
@@ -53,15 +54,16 @@ class DataWorker(QtCore.QObject):
     def setCapturing(self, status):
         self.is_capturing = status
 
-    def startSocket(self, ip, port):
+    def startSocket(self, ip, port, buffer_size):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, buffer_size)
         self.sock.connect((ip, port))
 
     def terminate(self):
         self.is_capturing = False
 
     def readData(self):
-        self.startSocket(self.ip, self.port)
+        global cuda_enabled
         x = 0
         packet_failed = 0
         decimate_enabled = False
@@ -70,6 +72,8 @@ class DataWorker(QtCore.QObject):
         # Make the right amount of space for receiving data
         total_channels = self.electrodes_model.rowCount()
         buffer_size = total_channels * self.samples * 3
+        # Start our socket with the right buffer limit
+        self.startSocket(self.ip, self.port, buffer_size*2)
         # Forcing this to true for now, might add a hard disable later
         welch_enabled = True
         welch_window = self.settings['fft']['welch_window']
@@ -113,73 +117,80 @@ class DataWorker(QtCore.QObject):
         self.is_capturing = True
 
         while True:
-            data = self.sock.recv(buffer_size)
+            recv_data = self.sock.recv(buffer_size*4)
+            if(len(recv_data) > buffer_size):
+                print("recv_data length:", len(recv_data), "buffer size", buffer_size)
             # Extract all channel samples from the packet
             # We use a try statement as occasionally packet loss messes up the data
-            try:
-                # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
-                if(active_reference > -1):
-                    ref_values = data[n::total_channels]
-                    ref_values = numpy.fromiter((int.from_bytes(data[idx:idx+3], 'little', signed=True) for idx in range(0,self.samples*3,3)), dtype=numpy.int32, count=self.samples)
-                else:
-                    ref_values = numpy.zeros(self.samples)
-                
-                for n in active_channels:
-                    # Each data packet comes with multiple 3-byte samples at a time, interleaved such that
-                    # the first sample of each channel is sent, then the second sample, and so on.
-                    # We de-interleave the data to keep only the channels we care about.
-                    samples_bytes = [data[idx:idx+3] for idx in range(n*3,buffer_size,total_channels+1)]
-
-                    # The 3 bytes of each sample are formatted in little endian.
-                    # We convert them to a 32bit integer, which automatically appends a zero to the LSB,
-                    # to retain the signedness of the value.
-                    samples = numpy.fromiter((int.from_bytes(samples_bytes[idx], 'little', signed=True) for idx in range(self.samples)), dtype=numpy.int32, count=self.samples)
-                    
-                    # We apply the reference value and gain
-                    samples = (samples - ref_values)*self.gain
-                    welch_buffers[n].extend(samples)
-                    
-                    # Send sample to plot
-                    # Rate limited to only calculate the spectrum every once in a while, to avoid lag
-                    # Since we're working with an entire set of samples, we need the corresponding x values
-                    samples_time = numpy.linspace(x/self.fs, (x+self.samples)/self.fs, num=self.samples)
-                    if welch_enabled:
-                        if x % update_rate == 0:
-                            f, pxx = signal.welch(x=welch_buffers[n], fs=self.fs, nperseg=welch_window/5)
-                            values = numpy.stack((f, pxx))
-                            log_pxx = 10*numpy.log10(pxx)
-                            self.data_connectors[n + (total_channels)].cb_set_data(log_pxx, f)
-                            for band, [lower, upper] in global_vars.FREQ_BANDS.items():
-                                freq_filter = (values[0, :] >= lower) & (values[0, :] <= upper)
-                                band_values = values[1, freq_filter]
-                                idx = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, band)[0]
-                                try:
-                                    self.freq_bands_model.setValue(idx.siblingAtColumn(1), float(numpy.sum(band_values)/numpy.sum(pxx)))
-                                except ZeroDivisionError:
-                                    pass
-                    if decimate_enabled:
-                        if zf[n] is None:
-                            zf[n] = signal.lfiltic(b=alias_filter, a=1, y=samples[0])
-                            self.data_connectors[n].cb_append_data_array(samples, samples_time)
-                        else: 
-                            [samples], zf[n] = signal.lfilter(b=alias_filter, a=1, x=[samples], zi=zf[n])
-                        if x % decimate_factor == 0:
-                            self.data_connectors[n].cb_append_data_array(samples, samples_time)
+            packets = int(len(recv_data) / buffer_size)
+            for i in range(packets):
+                data = recv_data[i*buffer_size:(i+1)*buffer_size]
+                try:
+                    # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
+                    if(active_reference > -1):
+                        ref_values = data[n::total_channels]
+                        ref_values = numpy.fromiter((int.from_bytes(data[idx:idx+3], 'little', signed=True) for idx in range(0,self.samples*3,3)), dtype=numpy.int32, count=self.samples)
                     else:
-                        self.data_connectors[n].cb_append_data_array(samples, samples_time)
+                        ref_values = numpy.zeros(self.samples)
+                    
+                    for n in active_channels:
+                        # Each data packet comes with multiple 3-byte samples at a time, interleaved such that
+                        # the first sample of each channel is sent, then the second sample, and so on.
+                        # We de-interleave the data to keep only the channels we care about.
+                        samples_bytes = [data[idx:idx+3] for idx in range(n*3,buffer_size,total_channels+1)]
 
-                    if not self.is_capturing:
+                        # The 3 bytes of each sample are formatted in little endian.
+                        # We convert them to a 32bit integer, which automatically appends a zero to the LSB,
+                        # to retain the signedness of the value.
+                        samples = numpy.fromiter((int.from_bytes(samples_bytes[idx], 'little', signed=True) for idx in range(self.samples)), dtype=numpy.int32, count=self.samples)
+                        
+                        # We apply the reference value and gain
+                        samples = (samples - ref_values)*self.gain
+                        welch_buffers[n].extend(samples)
+                        
+                        # Send sample to plot
+                        # Rate limited to only calculate the spectrum every once in a while, to avoid lag
+                        # Since we're working with an entire set of samples, we need the corresponding x values
+                        samples_time = numpy.linspace(x/self.fs, (x+self.samples)/self.fs, num=self.samples)
+                        if welch_enabled:
+                            if x % update_rate == 0:
+                                f, pxx = signal.welch(x=welch_buffers[n], fs=self.fs, nperseg=welch_window/5)
+                                values = numpy.stack((f, pxx))
+                                log_pxx = 10*numpy.log10(pxx)
+                                if cuda_enabled:
+                                    self.data_connectors[n + (total_channels)].cb_set_data(log_pxx.get(), f.get())
+                                else: self.data_connectors[n + (total_channels)].cb_set_data(log_pxx, f)
+                                for band, [lower, upper] in global_vars.FREQ_BANDS.items():
+                                    freq_filter = (values[0, :] >= lower) & (values[0, :] <= upper)
+                                    band_values = values[1, freq_filter]
+                                    idx = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, band)[0]
+                                    try:
+                                        self.freq_bands_model.setValue(idx.siblingAtColumn(1), float(numpy.sum(band_values)/numpy.sum(pxx)))
+                                    except ZeroDivisionError:
+                                        pass
+                        if decimate_enabled:
+                            if zf[n] is None:
+                                zf[n] = signal.lfiltic(b=alias_filter, a=1, y=samples[0])
+                                self.data_connectors[n].cb_append_data_array(samples, samples_time)
+                            else: 
+                                [samples], zf[n] = signal.lfilter(b=alias_filter, a=1, x=[samples], zi=zf[n])
+                            if x % decimate_factor == 0:
+                                self.data_connectors[n].cb_append_data_array(samples, samples_time)
+                        else:
+                            self.data_connectors[n].cb_append_data_array(samples, samples_time)
+
+                        if not self.is_capturing:
+                            self.finished.emit()
+                            return
+
+                    x += self.samples
+                    if packet_failed > 0:
+                        packet_failed -= 1
+                    
+                except IndexError:
+                    packet_failed += 1
+                    print("Packet reading failed! Failed attempts:", packet_failed)
+                    if packet_failed > global_vars.MAX_ERRORS:
+                        print("Failed to read packets too many times, dropping connection")
                         self.finished.emit()
                         return
-
-                x += self.samples
-                if packet_failed > 0:
-                    packet_failed -= 1
-                
-            except IndexError:
-                packet_failed += 1
-                print("Packet reading failed! Failed attempts:", packet_failed)
-                if packet_failed > global_vars.MAX_ERRORS:
-                    print("Failed to read packets too many times, dropping connection")
-                    self.finished.emit()
-                    return
