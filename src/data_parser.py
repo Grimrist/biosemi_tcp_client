@@ -1,19 +1,19 @@
 from PyQt6 import QtCore
 from collections import deque
 
-try:
-    import numpy
-    from cupyx.scipy import signal
-    import cupyx.scipy.fft as cufft
-    from scipy import fft
-    fft.set_global_backend(cufft)
-    cuda_enabled = True
-except ImportError: 
-    import numpy
-    from scipy import signal, fft
+import numpy
+# try:
+#     from cupyx.scipy import signal
+#     import cupyx.scipy.fft as cufft
+#     from scipy import fft
+#     fft.set_global_backend(cufft)
+#     cuda_enabled = True
+# except ImportError: 
+from scipy import signal, fft
+cuda_enabled = False
 
 import global_vars
-from time import sleep
+from time import sleep, perf_counter_ns
 import threading
 import struct
 import socket
@@ -117,7 +117,8 @@ class DataWorker(QtCore.QObject):
         self.is_capturing = True
 
         while True:
-            recv_data = self.sock.recv(buffer_size*4)
+            start = perf_counter_ns()
+            recv_data = self.sock.recv(buffer_size*2)
             if(len(recv_data) > buffer_size):
                 print("recv_data length:", len(recv_data), "buffer size", buffer_size)
             # Extract all channel samples from the packet
@@ -126,34 +127,45 @@ class DataWorker(QtCore.QObject):
             for i in range(packets):
                 data = recv_data[i*buffer_size:(i+1)*buffer_size]
                 try:
+                    # Each data packet comes with multiple 3-byte samples at a time, interleaved such that
+                    # the first sample of each channel is sent, then the second sample, and so on.
+                    # First we reshape the matrix such that each row is one 24-bit integer
+                    deinterleave_data = numpy.frombuffer(buffer=data, dtype='<b').reshape(-1, 3)
+                    # De-interleave by transposing (Fortran order) and then reshaping into (channels * samples * bytes) shaped array
+                    reshaped_data = deinterleave_data.reshape((total_channels, self.samples, 3), order='F')
+                    # Get view of only the channels we're interested in
+                    channel_data = reshaped_data[[active_channels], :]
+
                     # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
                     if(active_reference > -1):
-                        ref_values = data[n::total_channels]
-                        ref_values = numpy.fromiter((int.from_bytes(data[idx:idx+3], 'little', signed=True) for idx in range(0,self.samples*3,3)), dtype=numpy.int32, count=self.samples)
+                        ref_data = data[active_reference, :]
+                        ref_values = numpy.fromiter(
+                            (int.from_bytes(ref_data[idx, :], 'little', signed=True) for idx in range(0, self.samples)), 
+                            dtype=numpy.int32, count=self.samples)
+                        print("Ref:", ref_values)
                     else:
                         ref_values = numpy.zeros(self.samples)
-                    
-                    for n in active_channels:
-                        # Each data packet comes with multiple 3-byte samples at a time, interleaved such that
-                        # the first sample of each channel is sent, then the second sample, and so on.
-                        # We de-interleave the data to keep only the channels we care about.
-                        samples_bytes = [data[idx:idx+3] for idx in range(n*3,buffer_size,total_channels+1)]
 
-                        # The 3 bytes of each sample are formatted in little endian.
-                        # We convert them to a 32bit integer, which automatically appends a zero to the LSB,
-                        # to retain the signedness of the value.
-                        samples = numpy.fromiter((int.from_bytes(samples_bytes[idx], 'little', signed=True) for idx in range(self.samples)), dtype=numpy.int32, count=self.samples)
-                        
-                        # We apply the reference value and gain
-                        samples = (samples - ref_values)*self.gain
-                        welch_buffers[n].extend(samples)
-                        
-                        # Send sample to plot
-                        # Rate limited to only calculate the spectrum every once in a while, to avoid lag
-                        # Since we're working with an entire set of samples, we need the corresponding x values
-                        samples_time = numpy.linspace(x/self.fs, (x+self.samples)/self.fs, num=self.samples)
+                    # The samples are sent in little-endian format,
+                    # We convert them to a 32bit integer, which automatically appends a zero to the LSB,
+                    # to retain the signedness of the value.
+                    samples = numpy.fromiter(
+                        (int.from_bytes(channel_data[0, 0, idx, :], 'little', signed=True) for idx in range(0, self.samples)), 
+                        dtype=numpy.int32, count=self.samples)
+                    
+                    # We apply the reference value and gain
+                    samples = (samples - ref_values)*self.gain
+                    for i, channel in enumerate(active_channels):
+                        welch_buffers[channel].extend(samples)
+                    
+                    # Send sample to plot
+                    # Rate limited to only calculate the spectrum every once in a while, to avoid lag
+                    # Since we're working with an entire set of samples, we need the corresponding x values
+                    samples_time = numpy.linspace(x/self.fs, (x+self.samples)/self.fs, num=self.samples)
+                    for n in active_channels:
                         if welch_enabled:
                             if x % update_rate == 0:
+                                start = perf_counter_ns()
                                 f, pxx = signal.welch(x=welch_buffers[n], fs=self.fs, nperseg=welch_window/5)
                                 values = numpy.stack((f, pxx))
                                 log_pxx = 10*numpy.log10(pxx)
@@ -168,22 +180,27 @@ class DataWorker(QtCore.QObject):
                                         self.freq_bands_model.setValue(idx.siblingAtColumn(1), float(numpy.sum(band_values)/numpy.sum(pxx)))
                                     except ZeroDivisionError:
                                         pass
-                        if decimate_enabled:
-                            if zf[n] is None:
-                                zf[n] = signal.lfiltic(b=alias_filter, a=1, y=samples[0])
-                                self.data_connectors[n].cb_append_data_array(samples, samples_time)
-                            else: 
-                                [samples], zf[n] = signal.lfilter(b=alias_filter, a=1, x=[samples], zi=zf[n])
-                            if x % decimate_factor == 0:
-                                self.data_connectors[n].cb_append_data_array(samples, samples_time)
-                        else:
+                                stop = perf_counter_ns()
+                                print("Welch time (ms): ", (stop - start)/(10**6))
+
+                        # if decimate_enabled:
+                        #     if zf[n] is None:
+                        #         zf[n] = signal.lfiltic(b=alias_filter, a=1, y=samples[0])
+                        #         self.data_connectors[n].cb_append_data_array(samples, samples_time)
+                        #     else: 
+                        #         [samples], zf[n] = signal.lfilter(b=alias_filter, a=1, x=[samples], zi=zf[n])
+                        #     if x % decimate_factor == 0:
+                        #         self.data_connectors[n].cb_append_data_array(samples, samples_time)
+                        # else:
                             self.data_connectors[n].cb_append_data_array(samples, samples_time)
 
-                        if not self.is_capturing:
-                            self.finished.emit()
-                            return
+                    if not self.is_capturing:
+                        self.finished.emit()
+                        return
 
                     x += self.samples
+                    stop = perf_counter_ns()
+                    print("Time (in ms):", (stop - start)/(10**6))
                     if packet_failed > 0:
                         packet_failed -= 1
                     

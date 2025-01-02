@@ -3,11 +3,11 @@ from settings import SettingsHandler
 import sys
 from PyQt6 import QtWidgets, QtCore, QtGui
 import pyqtgraph
-try:
-    import cupy
-    pyqtgraph.setConfigOptions(useCupy=true)
-except:
-    pass
+# try:
+#     import cupy
+#     pyqtgraph.setConfigOptions(useCupy=true)
+# except:
+#     pass
 from pglive.sources.data_connector import DataConnector
 from pglive.sources.live_plot import LiveLinePlot
 from pglive.sources.live_plot_widget import LivePlotWidget
