@@ -117,8 +117,8 @@ class DataWorker(QtCore.QObject):
         self.is_capturing = True
 
         while True:
-            start_total = perf_counter_ns()
             recv_data = self.sock.recv(buffer_size*2)
+            start_total = perf_counter_ns()
             if(len(recv_data) > buffer_size):
                 print("recv_data length:", len(recv_data), "buffer size", buffer_size)
             # Extract all channel samples from the packet
@@ -156,34 +156,37 @@ class DataWorker(QtCore.QObject):
                     
                     # We apply the reference value and gain
                     samples = (samples - ref_values)*self.gain
+                    active_buffers = []
                     for i, channel in enumerate(active_channels):
                         welch_buffers[channel].extend(samples)
+                        active_buffers.append(welch_buffers[channel])
                     stop = perf_counter_ns()
                     print("Processing time (ms):", (stop - start)/(10**6) )
                     # Send sample to plot
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                     # Since we're working with an entire set of samples, we need the corresponding x values
                     samples_time = numpy.linspace(x/self.fs, (x+self.samples)/self.fs, num=self.samples)
-                    for n in active_channels:
-                        if welch_enabled:
-                            if x % update_rate == 0:
-                                start = perf_counter_ns()
-                                f, pxx = signal.welch(x=welch_buffers[n], fs=self.fs, nperseg=welch_window/5)
-                                values = numpy.stack((f, pxx))
-                                log_pxx = 10*numpy.log10(pxx)
-                                if cuda_enabled:
-                                    self.data_connectors[n + (total_channels)].cb_set_data(log_pxx.get(), f.get())
-                                else: self.data_connectors[n + (total_channels)].cb_set_data(log_pxx, f)
-                                for band, [lower, upper] in global_vars.FREQ_BANDS.items():
-                                    freq_filter = (values[0, :] >= lower) & (values[0, :] <= upper)
-                                    band_values = values[1, freq_filter]
-                                    idx = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, band)[0]
-                                    try:
-                                        self.freq_bands_model.setValue(idx.siblingAtColumn(1), float(numpy.sum(band_values)/numpy.sum(pxx)))
-                                    except ZeroDivisionError:
-                                        pass
-                                stop = perf_counter_ns()
-                                print("Welch time (ms): ", (stop - start)/(10**6))
+                    if welch_enabled:
+                        if x % update_rate == 0:
+                            start = perf_counter_ns()
+                            f, pxx = signal.welch(x=[active_buffers], fs=self.fs, nperseg=welch_window/5)
+                            values = numpy.vstack((f, pxx.reshape(len(active_channels), -1)))
+                            log_pxx = 10*numpy.log10(pxx)
+                            if cuda_enabled:
+                                self.data_connectors[n + (total_channels)].cb_set_data(log_pxx.get(), f.get())
+                            else: 
+                                for i, channel in enumerate(active_channels):
+                                    self.data_connectors[channel + (total_channels)].cb_set_data(log_pxx[0][i], f)
+                            for band, [lower, upper] in global_vars.FREQ_BANDS.items():
+                                freq_filter = (values[0, :] >= lower) & (values[0, :] <= upper)
+                                band_values = values[1, freq_filter]
+                                idx = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, band)[0]
+                                try:
+                                    self.freq_bands_model.setValue(idx.siblingAtColumn(1), float(numpy.sum(band_values)/numpy.sum(pxx)))
+                                except ZeroDivisionError:
+                                    pass
+                            stop = perf_counter_ns()
+                            print("Welch time (ms): ", (stop - start)/(10**6))
 
                         # if decimate_enabled:
                         #     if zf[n] is None:
@@ -194,12 +197,15 @@ class DataWorker(QtCore.QObject):
                         #     if x % decimate_factor == 0:
                         #         self.data_connectors[n].cb_append_data_array(samples, samples_time)
                         # else:
-                            self.data_connectors[n].cb_append_data_array(samples, samples_time)
+                    start = perf_counter_ns()
+                    for i, channel in enumerate(active_channels):
+                        self.data_connectors[channel].cb_append_data_array(samples, samples_time)
 
                     if not self.is_capturing:
                         self.finished.emit()
                         return
-
+                    stop = perf_counter_ns()
+                    print("Allocate data (ms):", (stop - start)/(10**6))
                     x += self.samples
                     if packet_failed > 0:
                         packet_failed -= 1
