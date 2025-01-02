@@ -445,6 +445,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.worker.terminate()
         if global_vars.DEBUG:
             self.debug_worker.terminate()
+
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
     def cleanup(self):
@@ -475,7 +476,6 @@ class GraphWindow(QtWidgets.QWidget):
             self.debug_worker.finished.connect(self.debug_thread.quit)
             self.debug_worker.finished.connect(self.debug_worker.deleteLater)
             self.debug_thread.finished.connect(self.debug_thread.deleteLater)
-            self.debug_thread.finished.connect(self.cleanup)
             self.debug_thread.start()
 
         self.data_thread = QtCore.QThread()
