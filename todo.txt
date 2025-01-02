@@ -13,3 +13,5 @@
     - Level-triggered (not edge)
     - Active high (high-level triggers stimulation)
     - Minimum length of trigger: 1ms
+- Potentially use CUDA to speed everything up
+    - Hard to test if I'm still calling sleep in the worker thread

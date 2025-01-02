@@ -14,9 +14,9 @@ from data_parser import DataWorker
 from custom_live_plot import CustomLivePlotWidget
 import global_vars
 
-
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
     global_vars.DEBUG = True
+    from debug_source import DebugWorker
 
 # MainWindow holds all other windows, initializes the settings,
 # and connects every needed signal to its respective slot.
@@ -431,8 +431,6 @@ class GraphWindow(QtWidgets.QWidget):
             plot.hide()
         return
 
-    # Something is going horribly wrong every time we restart,
-    # so we just go nuclear: delete everything and rebuild.
     def startCapture(self):
         if not self.is_capturing:
             self.initializeGraphs()
@@ -445,7 +443,10 @@ class GraphWindow(QtWidgets.QWidget):
         if not self.is_capturing:
             return
         self.worker.terminate()
-
+        if global_vars.DEBUG:
+            self.debug_worker.terminate()
+    # Something is going horribly wrong every time we restart,
+    # so we just go nuclear: delete everything and rebuild.
     def cleanup(self):
         self.is_capturing = False
         for connector in self.data_connectors:
@@ -465,6 +466,18 @@ class GraphWindow(QtWidgets.QWidget):
 
     # Initialize data worker and thread
     def initializeWorker(self):
+        # Start our debug worker, if we're running on debug mode
+        if global_vars.DEBUG:
+            self.debug_thread = QtCore.QThread()
+            self.debug_worker = DebugWorker(self.settings, self.electrodes_model)
+            self.debug_worker.moveToThread(self.debug_thread)
+            self.debug_thread.started.connect(self.debug_worker.generateSignal)
+            self.debug_worker.finished.connect(self.debug_thread.quit)
+            self.debug_worker.finished.connect(self.debug_worker.deleteLater)
+            self.debug_thread.finished.connect(self.debug_thread.deleteLater)
+            self.debug_thread.finished.connect(self.cleanup)
+            self.debug_thread.start()
+
         self.data_thread = QtCore.QThread()
         self.worker = DataWorker(self.settings, self.electrodes_model, self.freq_bands_model, self.plots, self.data_connectors)
         self.worker.moveToThread(self.data_thread)

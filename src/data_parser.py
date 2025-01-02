@@ -1,18 +1,27 @@
 from PyQt6 import QtCore
 from collections import deque
-from scipy import signal, fft
-from time import sleep
+# try:
+#     import numpy
+#     from cupyx.scipy import signal
+#     import cupyx.scipy.fft as cufft
+#     from scipy import fft
+#     fft.set_global_backend(cufft)
+# except ImportError: 
 import numpy
+from scipy import signal, fft
+    # pass
+
+from time import sleep
 import global_vars
 import threading
 import struct
-from utils import RingBuffer
+import socket
 
 ## Seems to be slower...
 # import pyfftw
 # fft.set_global_backend(pyfftw.interfaces.scipy_fft)
 # pyfftw.interfaces.cache.enable()
-# pyfftw.interfaces.cache.set_keepalive_time(30)
+# pyfftw.interfaces.cache.set_keepalive_time(3)
 
 ## Controller for the worker so we don't hang the thread when we need stuff to happen
 
@@ -52,8 +61,7 @@ class DataWorker(QtCore.QObject):
         self.is_capturing = False
 
     def readData(self):
-        if not global_vars.DEBUG:
-            self.startSocket(self.ip, self.port)
+        self.startSocket(self.ip, self.port)
         x = 0
         packet_failed = 0
         decimate_enabled = False
@@ -101,31 +109,11 @@ class DataWorker(QtCore.QObject):
             self.data_connectors[i].resume()
             self.plots[i+total_channels].show()
             self.data_connectors[i+total_channels].resume()
-        if global_vars.DEBUG:
-            t = 0 # Used for generating sine signal continuously
-        self.is_capturing = True
-        while True:
-            if global_vars.DEBUG:
-                rng = numpy.random.default_rng()
-                # data = rng.bytes(buffer_size)
-                # Instead of doing random values, let's try generating a 10 [Hz] sine wave with some noise
-                data = bytearray()
-                lspace = numpy.linspace(t, t+(self.samples/self.fs), self.samples)
-                noise_power = 0.00001 * self.fs/2
-                noise = rng.normal(scale=numpy.sqrt(noise_power), size=lspace.shape)
-                for j, i in enumerate(lspace):
-                    for _ in range(total_channels):
-                        if t > 2: val_orig = int((numpy.sin(2 * numpy.pi * 100 * i) + noise[j])*100) 
-                        else: val_orig = int((numpy.sin(2 * numpy.pi * 10 * i) + noise[j])*10000) 
-                        val = (val_orig).to_bytes(3, byteorder='little', signed=True)
-                        if(len(val) > 3):
-                            val = val[-3:]
-                        data.extend(val)
-                t += self.samples/self.fs
-            else:
-                # Read the next packet from the network
-                data = self.sock.recv(buffer_size)
 
+        self.is_capturing = True
+
+        while True:
+            data = self.sock.recv(buffer_size)
             # Extract all channel samples from the packet
             # We use a try statement as occasionally packet loss messes up the data
             try:
@@ -150,6 +138,7 @@ class DataWorker(QtCore.QObject):
                     # We apply the reference value and gain
                     samples = (samples - ref_values)*self.gain
                     welch_buffers[n].extend(samples)
+                    
                     # Send sample to plot
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                     # Since we're working with an entire set of samples, we need the corresponding x values
@@ -184,8 +173,6 @@ class DataWorker(QtCore.QObject):
                         return
 
                 x += self.samples
-                if global_vars.DEBUG:
-                    sleep(self.samples/self.fs)
                 if packet_failed > 0:
                     packet_failed -= 1
                 
