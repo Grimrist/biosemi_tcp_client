@@ -117,7 +117,7 @@ class DataWorker(QtCore.QObject):
         self.is_capturing = True
 
         while True:
-            start = perf_counter_ns()
+            start_total = perf_counter_ns()
             recv_data = self.sock.recv(buffer_size*2)
             if(len(recv_data) > buffer_size):
                 print("recv_data length:", len(recv_data), "buffer size", buffer_size)
@@ -127,6 +127,7 @@ class DataWorker(QtCore.QObject):
             for i in range(packets):
                 data = recv_data[i*buffer_size:(i+1)*buffer_size]
                 try:
+                    start = perf_counter_ns()
                     # Each data packet comes with multiple 3-byte samples at a time, interleaved such that
                     # the first sample of each channel is sent, then the second sample, and so on.
                     # First we reshape the matrix such that each row is one 24-bit integer
@@ -157,7 +158,8 @@ class DataWorker(QtCore.QObject):
                     samples = (samples - ref_values)*self.gain
                     for i, channel in enumerate(active_channels):
                         welch_buffers[channel].extend(samples)
-                    
+                    stop = perf_counter_ns()
+                    print("Processing time (ms):", (stop - start)/(10**6) )
                     # Send sample to plot
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                     # Since we're working with an entire set of samples, we need the corresponding x values
@@ -199,8 +201,6 @@ class DataWorker(QtCore.QObject):
                         return
 
                     x += self.samples
-                    stop = perf_counter_ns()
-                    print("Time (in ms):", (stop - start)/(10**6))
                     if packet_failed > 0:
                         packet_failed -= 1
                     
@@ -211,3 +211,5 @@ class DataWorker(QtCore.QObject):
                         print("Failed to read packets too many times, dropping connection")
                         self.finished.emit()
                         return
+            stop_total = perf_counter_ns()
+            print("Total time (ms):", (stop_total - start_total)/(10**6))
