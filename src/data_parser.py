@@ -131,11 +131,28 @@ class DataWorker(QtCore.QObject):
                     # Each data packet comes with multiple 3-byte samples at a time, interleaved such that
                     # the first sample of each channel is sent, then the second sample, and so on.
                     # First we reshape the matrix such that each row is one 24-bit integer
+                    start_test = perf_counter_ns()
                     deinterleave_data = numpy.frombuffer(buffer=data, dtype='<b').reshape(-1, 3)
                     # De-interleave by transposing (Fortran order) and then reshaping into (channels * samples * bytes) shaped array
                     reshaped_data = deinterleave_data.reshape((total_channels, self.samples, 3), order='F')
                     # Get view of only the channels we're interested in
                     channel_data = reshaped_data[[active_channels], :]
+                    # The samples are sent in little-endian format,
+                    # We convert them to a 32bit integer, which automatically appends a zero to the LSB,
+                    # to retain the signedness of the value.
+                    samples = numpy.fromiter(
+                        (int.from_bytes(channel_data[0, 0, idx, :], 'little', signed=True) for idx in range(0, self.samples)), 
+                        dtype=numpy.int32, count=self.samples)
+                    stop_test = perf_counter_ns()
+                    # print("My method (ms):", (stop_test - start_test)/(10**6))
+                    start_test = perf_counter_ns()
+                    a = numpy.empty((self.samples, total_channels, 4), dtype=numpy.uint8)
+                    raw_bytes = numpy.frombuffer(data, dtype=numpy.uint8)
+                    a[:, :, :3] = raw_bytes.reshape(-1, total_channels, 3)
+                    a[:, :, 3:] = (a[:, :, 3 - 1:3] >> 7) * 255
+                    result = a.view('<i4').reshape(a.shape[:-1])
+                    stop_test = perf_counter_ns()
+                    # print("Their method (ms):", (stop_test - start_test)/(10**6))
 
                     # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
                     if(active_reference > -1):
@@ -143,17 +160,12 @@ class DataWorker(QtCore.QObject):
                         ref_values = numpy.fromiter(
                             (int.from_bytes(ref_data[idx, :], 'little', signed=True) for idx in range(0, self.samples)), 
                             dtype=numpy.int32, count=self.samples)
-                        print("Ref:", ref_values)
+                        # print("Ref:", ref_values)
                     else:
                         ref_values = numpy.zeros(self.samples)
 
-                    # The samples are sent in little-endian format,
-                    # We convert them to a 32bit integer, which automatically appends a zero to the LSB,
-                    # to retain the signedness of the value.
-                    samples = numpy.fromiter(
-                        (int.from_bytes(channel_data[0, 0, idx, :], 'little', signed=True) for idx in range(0, self.samples)), 
-                        dtype=numpy.int32, count=self.samples)
-                    
+
+
                     # We apply the reference value and gain
                     samples = (samples - ref_values)*self.gain
                     active_buffers = []
@@ -161,7 +173,7 @@ class DataWorker(QtCore.QObject):
                         welch_buffers[channel].extend(samples)
                         active_buffers.append(welch_buffers[channel])
                     stop = perf_counter_ns()
-                    print("Processing time (ms):", (stop - start)/(10**6) )
+                    # print("Processing time (ms):", (stop - start)/(10**6) )
                     # Send sample to plot
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                     # Since we're working with an entire set of samples, we need the corresponding x values
@@ -171,6 +183,7 @@ class DataWorker(QtCore.QObject):
                             start = perf_counter_ns()
                             f, pxx = signal.welch(x=[active_buffers], fs=self.fs, nperseg=welch_window/5)
                             values = numpy.vstack((f, pxx.reshape(len(active_channels), -1)))
+                            pxx[pxx == 0] = 0.0000000001
                             log_pxx = 10*numpy.log10(pxx)
                             if cuda_enabled:
                                 self.data_connectors[n + (total_channels)].cb_set_data(log_pxx.get(), f.get())
@@ -181,12 +194,14 @@ class DataWorker(QtCore.QObject):
                                 freq_filter = (values[0, :] >= lower) & (values[0, :] <= upper)
                                 band_values = values[1, freq_filter]
                                 idx = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, band)[0]
-                                try:
-                                    self.freq_bands_model.setValue(idx.siblingAtColumn(1), float(numpy.sum(band_values)/numpy.sum(pxx)))
-                                except ZeroDivisionError:
-                                    pass
+                                band_sum = numpy.sum(band_values)
+                                pxx_sum = numpy.sum(pxx)
+                                if pxx_sum == 0 or band_sum == 0:
+                                    div = 0
+                                else: div = float(band_sum / pxx_sum)
+                                self.freq_bands_model.setValue(idx.siblingAtColumn(1), div)
                             stop = perf_counter_ns()
-                            print("Welch time (ms): ", (stop - start)/(10**6))
+                            # print("Welch time (ms): ", (stop - start)/(10**6))
 
                         # if decimate_enabled:
                         #     if zf[n] is None:
@@ -205,7 +220,7 @@ class DataWorker(QtCore.QObject):
                         self.finished.emit()
                         return
                     stop = perf_counter_ns()
-                    print("Allocate data (ms):", (stop - start)/(10**6))
+                    # print("Allocate data (ms):", (stop - start)/(10**6))
                     x += self.samples
                     if packet_failed > 0:
                         packet_failed -= 1
@@ -218,4 +233,4 @@ class DataWorker(QtCore.QObject):
                         self.finished.emit()
                         return
             stop_total = perf_counter_ns()
-            print("Total time (ms):", (stop_total - start_total)/(10**6))
+            # print("Total time (ms):", (stop_total - start_total)/(10**6))

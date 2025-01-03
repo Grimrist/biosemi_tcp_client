@@ -352,14 +352,15 @@ class SelectionWindow(QtWidgets.QTabWidget):
         ## Temporary placement, this might need its own thread
         if self.serial_port.is_open:
             if status:
-                self.serial_port.write(bytes(band + " over threshold\n", 'ascii'))
+                self.serial_port.write(b'\x01')
             else:
-                self.serial_port.write(bytes(band + " under threshold\n", 'ascii'))
+                self.serial_port.write(b'\x00')
 
     def initializeSerial(self):
         try:
             self.serial_port = serial.Serial('/dev/ttyUSB0', 115200)
         except serial.serialutil.SerialException:
+            print('\033[91m' + "Failed to open serial port!" + '\033[0m')
             self.serial_port = serial.Serial()
 
     def setAlphaThreshold(self, value):
