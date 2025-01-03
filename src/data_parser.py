@@ -119,8 +119,8 @@ class DataWorker(QtCore.QObject):
         while True:
             recv_data = self.sock.recv(buffer_size*2)
             start_total = perf_counter_ns()
-            if(len(recv_data) > buffer_size):
-                print("recv_data length:", len(recv_data), "buffer size", buffer_size)
+            # if(len(recv_data) > buffer_size):
+                # print("recv_data length:", len(recv_data), "buffer size", buffer_size)
             # Extract all channel samples from the packet
             # We use a try statement as occasionally packet loss messes up the data
             packets = int(len(recv_data) / buffer_size)
@@ -145,22 +145,21 @@ class DataWorker(QtCore.QObject):
                         dtype=numpy.int32, count=self.samples)
                     stop_test = perf_counter_ns()
                     # print("My method (ms):", (stop_test - start_test)/(10**6))
-                    start_test = perf_counter_ns()
-                    a = numpy.empty((self.samples, total_channels, 4), dtype=numpy.uint8)
-                    raw_bytes = numpy.frombuffer(data, dtype=numpy.uint8)
-                    a[:, :, :3] = raw_bytes.reshape(-1, total_channels, 3)
-                    a[:, :, 3:] = (a[:, :, 3 - 1:3] >> 7) * 255
-                    result = a.view('<i4').reshape(a.shape[:-1])
-                    stop_test = perf_counter_ns()
+                    # start_test = perf_counter_ns()
+                    # a = numpy.empty((self.samples, total_channels, 4), dtype=numpy.uint8)
+                    # raw_bytes = numpy.frombuffer(data, dtype=numpy.uint8)
+                    # a[:, :, :3] = raw_bytes.reshape(-1, total_channels, 3)
+                    # a[:, :, 3:] = (a[:, :, 3 - 1:3] >> 7) * 255
+                    # result = a.view('<i4').reshape(a.shape[:-1])
+                    # stop_test = perf_counter_ns()
                     # print("Their method (ms):", (stop_test - start_test)/(10**6))
 
                     # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
                     if(active_reference > -1):
-                        ref_data = data[active_reference, :]
+                        ref_data = reshaped_data[active_reference, :]
                         ref_values = numpy.fromiter(
                             (int.from_bytes(ref_data[idx, :], 'little', signed=True) for idx in range(0, self.samples)), 
                             dtype=numpy.int32, count=self.samples)
-                        # print("Ref:", ref_values)
                     else:
                         ref_values = numpy.zeros(self.samples)
 
