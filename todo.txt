@@ -19,3 +19,5 @@
 - Use the internet's method for the 24bit interleave because I'm clearly not smart enough
 - Add button to disable serial pulses
 - Notify serial port of capture ending (disable the pulse)
+- How should the band readings work when reading from multiple channels?
+- 

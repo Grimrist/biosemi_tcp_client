@@ -34,12 +34,12 @@ class DebugWorker(QtCore.QObject):
         while True:
             data = bytearray()
             lspace = numpy.linspace(t, t+(self.samples/self.fs), self.samples)
-            noise_power = 2 * self.fs/2
+            noise_power = 0.01 * self.fs/2
             noise = numpy.random.normal(scale=numpy.sqrt(noise_power), size=lspace.shape)
             for j, i in enumerate(lspace):
                 for _ in range(total_channels):
-                    if t < 10: val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*1000 + noise[j]) 
-                    else: val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*100 + noise[j]) 
+                    if t < 20: val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*10000 + noise[j]) 
+                    else: val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*10 + noise[j]) 
                     val = (val_orig).to_bytes(3, byteorder='little', signed=True)
                     if(len(val) > 3):
                         val = val[-3:]
@@ -57,7 +57,7 @@ class DebugWorker(QtCore.QObject):
                 return
 
             t += self.samples/self.fs
-            t = t % 20
+            t = t % 40
             sleep(self.samples/self.fs)
 
 

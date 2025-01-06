@@ -181,20 +181,23 @@ class DataWorker(QtCore.QObject):
                         if x % update_rate == 0:
                             start = perf_counter_ns()
                             f, pxx = signal.welch(x=[active_buffers], fs=self.fs, nperseg=welch_window/5)
-                            values = numpy.vstack((f, pxx.reshape(len(active_channels), -1)))
+                            pxx = numpy.squeeze(pxx)
                             pxx[pxx == 0] = 0.0000000001
                             log_pxx = 10*numpy.log10(pxx)
                             if cuda_enabled:
                                 self.data_connectors[n + (total_channels)].cb_set_data(log_pxx.get(), f.get())
                             else: 
                                 for i, channel in enumerate(active_channels):
-                                    self.data_connectors[channel + (total_channels)].cb_set_data(log_pxx[0][i], f)
+                                    self.data_connectors[channel + (total_channels)].cb_set_data(log_pxx, f)
                             for band, [lower, upper] in global_vars.FREQ_BANDS.items():
-                                freq_filter = (values[0, :] >= lower) & (values[0, :] <= upper)
-                                band_values = values[1, freq_filter]
+                                freq_filter = (f >= lower) & (f <= upper)
+                                #print(pxx)
+                                band_values = pxx[freq_filter]
+                                #print(band, band_values)
                                 idx = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, band)[0]
                                 band_sum = numpy.sum(band_values)
                                 pxx_sum = numpy.sum(pxx)
+                                #print(band, band_sum, pxx_sum)
                                 if pxx_sum == 0 or band_sum == 0:
                                     div = 0
                                 else: div = float(band_sum / pxx_sum)
