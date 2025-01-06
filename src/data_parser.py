@@ -119,7 +119,6 @@ class DataWorker(QtCore.QObject):
             self.data_connectors[i+total_channels].resume()
 
         self.is_capturing = True
-
         while True:
             recv_data = self.sock.recv(buffer_size*2)
             start_total = perf_counter_ns()
@@ -132,6 +131,7 @@ class DataWorker(QtCore.QObject):
                 data = recv_data[i*buffer_size:(i+1)*buffer_size]
                 try:
                     start = perf_counter_ns()
+                    a = numpy.zeros((total_channels, self.samples, 4), dtype='uint8')
                     # Each data packet comes with multiple 3-byte samples at a time, interleaved such that
                     # the first sample of each channel is sent, then the second sample, and so on.
                     # First we reshape the matrix such that each row is one 24-bit integer
@@ -139,35 +139,16 @@ class DataWorker(QtCore.QObject):
                     deinterleave_data = numpy.frombuffer(buffer=data, dtype='<b').reshape(-1, 3)
                     # De-interleave by transposing (Fortran order) and then reshaping into (channels * samples * bytes) shaped array
                     reshaped_data = deinterleave_data.reshape((total_channels, self.samples, 3), order='F')
-                    # Get view of only the channels we're interested in
-                    channel_data = reshaped_data[[active_channels], :]
-                    # The samples are sent in little-endian format,
-                    # We convert them to a 32bit integer, which automatically appends a zero to the LSB,
-                    # to retain the signedness of the value.
-                    samples = numpy.fromiter(
-                        (int.from_bytes(channel_data[0, 0, idx, :], 'little', signed=True) for idx in range(0, self.samples)), 
-                        dtype=numpy.int32, count=self.samples)
+                    # Copy bytes into new 4-byte array, change view to uint32, filter by only the channels we need and squeeze dimensions
+                    a[:,:,-3:] = reshaped_data
+                    samples = a.view('int32')[[active_channels], :].reshape(len(active_channels), self.samples)
                     stop_test = perf_counter_ns()
                     # print("My method (ms):", (stop_test - start_test)/(10**6))
-                    # start_test = perf_counter_ns()
-                    # a = numpy.empty((self.samples, total_channels, 4), dtype=numpy.uint8)
-                    # raw_bytes = numpy.frombuffer(data, dtype=numpy.uint8)
-                    # a[:, :, :3] = raw_bytes.reshape(-1, total_channels, 3)
-                    # a[:, :, 3:] = (a[:, :, 3 - 1:3] >> 7) * 255
-                    # result = a.view('<i4').reshape(a.shape[:-1])
-                    # stop_test = perf_counter_ns()
-                    # print("Their method (ms):", (stop_test - start_test)/(10**6))
-
                     # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
                     if(active_reference > -1):
-                        ref_data = reshaped_data[active_reference, :]
-                        ref_values = numpy.fromiter(
-                            (int.from_bytes(ref_data[idx, :], 'little', signed=True) for idx in range(0, self.samples)), 
-                            dtype=numpy.int32, count=self.samples)
+                        ref_data = reshaped_data[active_reference, :].reshape(1, self.samples)
                     else:
                         ref_values = numpy.zeros(self.samples)
-
-
 
                     # We apply the reference value and gain
                     samples = (samples - ref_values)*self.gain
@@ -181,7 +162,7 @@ class DataWorker(QtCore.QObject):
                     if welch_enabled:
                         if x % update_rate == 0:
                             for i, channel in enumerate(active_channels):
-                                welch_buffers[channel].extend(samples)
+                                welch_buffers[channel].extend(samples[i])
                                 active_buffers.append(welch_buffers[channel])
                             active_buffers = numpy.vstack(active_buffers)
                             avg_buffer = numpy.average(active_buffers, axis=0)
@@ -204,7 +185,7 @@ class DataWorker(QtCore.QObject):
                                 else: div = float(band_sum / pxx_sum)
                                 self.freq_bands_model.setValue(idx.siblingAtColumn(1), div)
                             stop = perf_counter_ns()
-                            print("Welch time (ms): ", (stop - start)/(10**6))
+                            # print("Welch time (ms): ", (stop - start)/(10**6))
 
                         # if decimate_enabled:
                         #     if zf[n] is None:
@@ -217,7 +198,8 @@ class DataWorker(QtCore.QObject):
                         # else:
                     start = perf_counter_ns()
                     for i, channel in enumerate(active_channels):
-                        self.data_connectors[channel].cb_append_data_array(samples, samples_time)
+                        # print("Samples:", samples)
+                        self.data_connectors[channel].cb_append_data_array(samples[i], samples_time)
 
                     if not self.is_capturing:
                         self.finished.emit()

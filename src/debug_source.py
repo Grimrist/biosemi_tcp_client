@@ -2,6 +2,7 @@ import socket
 import numpy
 from time import sleep, perf_counter
 from PyQt6 import QtCore
+import pyedflib
 
 # Worker class for opening a socket and generating a sine wave to read from
 class DebugWorker(QtCore.QObject):
@@ -60,4 +61,39 @@ class DebugWorker(QtCore.QObject):
             t = t % 40
             sleep(self.samples/self.fs)
 
-
+    def generateSignalFromFile(self):
+        self.terminated = False
+        total_channels = self.electrodes_model.rowCount()
+        f = pyedflib.EdfReader("../files/S001/S001R01.edf")
+        n = f.signals_in_file
+        signal_labels = f.getSignalLabels()
+        sigbufs = numpy.zeros((n, f.getNSamples()[0]), dtype=numpy.int16)
+        for i in numpy.arange(n):
+            sigbufs[i, :] = f.readSignal(i)
+        file_length = sigbufs.shape[1]
+        sigbufs_bytes = bytearray()
+        for samples in sigbufs.T:
+            for sample in samples:
+                val = int(sample).to_bytes(3, byteorder='little', signed=True)
+                if(len(val) > 3):
+                    val = val[-3:]
+                sigbufs_bytes.extend(val)
+        (client, port) = self.sock.accept()
+        for i in range(0, file_length):
+            # print("Sending data", sigbufs_bytes[(i*self.samples*total_channels*3):((i+1)*self.samples*total_channels*3)])
+            # print(self.samples, self.fs)
+            # print("Slices:", (i*self.samples*total_channels*3), ((i+1)*self.samples*total_channels*3))
+            sent = client.send(sigbufs_bytes[(i*self.samples*total_channels*3):((i+1)*self.samples*total_channels*3)])
+            if sent == 0:
+                print("No data sent, terminating!")
+                self.sock.close()
+                self.finished.emit()
+                return
+            if self.terminated:
+                print("Terminating debug thread!")
+                self.finished.emit()
+                return
+            sleep(self.samples/self.fs)
+        print("No more file to read, terminating")
+        self.finished.emit()
+        return

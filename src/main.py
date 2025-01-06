@@ -494,10 +494,11 @@ class GraphWindow(QtWidgets.QWidget):
             self.debug_thread = QtCore.QThread()
             self.debug_worker = DebugWorker(self.settings, self.electrodes_model)
             self.debug_worker.moveToThread(self.debug_thread)
-            self.debug_thread.started.connect(self.debug_worker.generateSignal)
+            self.debug_thread.started.connect(self.debug_worker.generateSignalFromFile)
             self.debug_worker.finished.connect(self.debug_thread.quit)
             self.debug_worker.finished.connect(self.debug_worker.deleteLater)
             self.debug_thread.finished.connect(self.debug_thread.deleteLater)
+            self.debug_worker.finished.connect(self.stopCapture)
             self.debug_thread.start()
 
         self.data_thread = QtCore.QThread()
