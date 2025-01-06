@@ -1,8 +1,7 @@
-- Welch spectrum update rate makes entire system lag -- need to make the whole graphing system more performant
-    - This is mostly a limitation of the library, but I could dynamically respond to low performance by changing the update rate
+- Welch spectrum update rate makes entire system lag
+    - This is mostly a limitation of the library, but some optimization was achieved by using numpy arrays as much as possible
 - Potentially allow changing which data we're reading in real time. (maybe)
 - Change aggregator classes (settings, model?) to have accessors so we no longer use direct references
-- Fix division by zero during runtime (normalization calculation, logarithm)
 - Maybe add a debug tab where I can more quickly configure certain values, only shows up with the -d flag on
     - I added a debug thread, so this should be much easier to implement via slots
 - Read tACS manual to determine how to configure and send a signal
@@ -15,9 +14,8 @@
     - Active high (high-level triggers stimulation)
     - Minimum length of trigger: 1ms
 - Potentially use CUDA to speed everything up
-    - Hard to test if I'm still calling sleep in the worker thread
+    - Testing showed it to actually be slower, surprisingly
 - Use the internet's method for the 24bit interleave because I'm clearly not smart enough
 - Add button to disable serial pulses
 - Notify serial port of capture ending (disable the pulse)
-- How should the band readings work when reading from multiple channels?
-- 
+- Add controller thread to finally solve all the annoying issues trying to start/stop the workers

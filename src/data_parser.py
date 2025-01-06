@@ -11,7 +11,7 @@ import numpy
 # except ImportError: 
 from scipy import signal, fft
 cuda_enabled = False
-
+from dvg_ringbuffer import RingBuffer
 import global_vars
 from time import sleep, perf_counter_ns
 import threading
@@ -19,10 +19,10 @@ import struct
 import socket
 
 ## Seems to be slower...
-# import pyfftw
-# fft.set_global_backend(pyfftw.interfaces.scipy_fft)
-# pyfftw.interfaces.cache.enable()
-# pyfftw.interfaces.cache.set_keepalive_time(3)
+import pyfftw
+fft.set_global_backend(pyfftw.interfaces.scipy_fft)
+pyfftw.interfaces.cache.enable()
+pyfftw.interfaces.cache.set_keepalive_time(3)
 
 ## Controller for the worker so we don't hang the thread when we need stuff to happen
 
@@ -91,7 +91,7 @@ class DataWorker(QtCore.QObject):
         # Initialize our buffers for FFT
         # We could skip this if FFT is not enabled, but I don't think it slows down regular time graphing too much
         for i in range(total_channels):
-            buf = deque(maxlen=welch_window)
+            buf = RingBuffer(capacity=welch_window)
             buf.extend(numpy.zeros(welch_window))
             welch_buffers.append(buf)
 
@@ -105,7 +105,11 @@ class DataWorker(QtCore.QObject):
             idx = self.electrodes_model.index(i,2)
             if self.electrodes_model.itemFromIndex(idx).data():
                 active_reference = i
-                
+        # If there are no active channels, we have nothing to capture, so we abort
+        if len(active_channels) == 0:
+            print("No channels selected, stopping capture")
+            self.finished.emit()
+            return
         # Enable connectors that we will be using
         self.data_connectors[active_channels[0]].ignore_auto_range = False
         for i in active_channels:
@@ -168,9 +172,6 @@ class DataWorker(QtCore.QObject):
                     # We apply the reference value and gain
                     samples = (samples - ref_values)*self.gain
                     active_buffers = []
-                    for i, channel in enumerate(active_channels):
-                        welch_buffers[channel].extend(samples)
-                        active_buffers.append(welch_buffers[channel])
                     stop = perf_counter_ns()
                     # print("Processing time (ms):", (stop - start)/(10**6) )
                     # Send sample to plot
@@ -179,9 +180,12 @@ class DataWorker(QtCore.QObject):
                     samples_time = numpy.linspace(x/self.fs, (x+self.samples)/self.fs, num=self.samples)
                     if welch_enabled:
                         if x % update_rate == 0:
-                            start = perf_counter_ns()
-                            f, pxx = signal.welch(x=[active_buffers], fs=self.fs, nperseg=welch_window/5)
-                            pxx = numpy.squeeze(pxx)
+                            for i, channel in enumerate(active_channels):
+                                welch_buffers[channel].extend(samples)
+                                active_buffers.append(welch_buffers[channel])
+                            active_buffers = numpy.vstack(active_buffers)
+                            avg_buffer = numpy.average(active_buffers, axis=0)
+                            f, pxx = signal.welch(x=avg_buffer, fs=self.fs, nperseg=welch_window/5)
                             pxx[pxx == 0] = 0.0000000001
                             log_pxx = 10*numpy.log10(pxx)
                             if cuda_enabled:
@@ -191,19 +195,16 @@ class DataWorker(QtCore.QObject):
                                     self.data_connectors[channel + (total_channels)].cb_set_data(log_pxx, f)
                             for band, [lower, upper] in global_vars.FREQ_BANDS.items():
                                 freq_filter = (f >= lower) & (f <= upper)
-                                #print(pxx)
                                 band_values = pxx[freq_filter]
-                                #print(band, band_values)
                                 idx = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, band)[0]
                                 band_sum = numpy.sum(band_values)
                                 pxx_sum = numpy.sum(pxx)
-                                #print(band, band_sum, pxx_sum)
                                 if pxx_sum == 0 or band_sum == 0:
                                     div = 0
                                 else: div = float(band_sum / pxx_sum)
                                 self.freq_bands_model.setValue(idx.siblingAtColumn(1), div)
                             stop = perf_counter_ns()
-                            # print("Welch time (ms): ", (stop - start)/(10**6))
+                            print("Welch time (ms): ", (stop - start)/(10**6))
 
                         # if decimate_enabled:
                         #     if zf[n] is None:

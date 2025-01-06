@@ -1,8 +1,12 @@
+dvg-ringbuffer==1.1.0
+fastrlock==0.8.3
 numpy==1.26.4
 pglive==0.8.0
+pyFFTW==0.15.0
 PyQt6==6.8.0
 PyQt6-Qt6==6.8.1
 PyQt6_sip==13.9.1
 pyqtgraph==0.13.7
 pyserial==3.5
 scipy==1.14.1
+setuptools==75.6.0

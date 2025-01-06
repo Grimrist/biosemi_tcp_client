@@ -94,9 +94,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.settings_handler.setWelchEnabled)
 
         # Thresholds
-        # Just a quick prototype, this needs custom classes
-        self.selection_window.alpha_threshold_box.valueChanged.connect(self.settings_handler.setAlphaThreshold)
-        self.selection_window.alpha_threshold_box.valueChanged.connect(self.selection_window.setAlphaThreshold)
+        # Just a quick prototype, this needs more robust support
+        self.selection_window.alpha_threshold_box.editingFinished.connect(self.updateAlphaThreshold)
 
         self.freq_bands_model.thresholdChanged.connect(self.selection_window.updateThresholdDisplay)
         ###
@@ -104,6 +103,14 @@ class MainWindow(QtWidgets.QMainWindow):
         # Show window
         self.setCentralWidget(main_widget)
         self.show()
+
+    # Function to update settings and selection window safely via editingFinished
+    # This is more of a hotfix, if we plan to support setting the other thresholds,
+    # this should be generalized.
+    def updateAlphaThreshold(self):
+        value = self.selection_window.alpha_threshold_box.value()
+        self.settings_handler.setAlphaThreshold(value)
+        self.selection_window.setAlphaThreshold(value)
 
     # Initializes the model that holds the channel and reference selection
     def initializeElectrodes(self):
@@ -123,7 +130,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.freq_bands_model is not None:
             self.freq_bands_model.clear()
         else: 
-            data = [[k,0, 0.5, False] for k in global_vars.FREQ_BANDS.keys()]
+            data = []
+            for k in global_vars.FREQ_BANDS.keys():
+                if k == "Alpha":
+                    data.append([k, 0, self.settings['threshold']['alpha'], False])
+                else: data.append([k, 0, 0.5, False])
             self.freq_bands_model = FreqTableModel(data, ["Bands", "Relative Power", "Threshold", "Status"])
 
     def setTotalChannels(self, channels):
@@ -306,8 +317,8 @@ class SelectionWindow(QtWidgets.QTabWidget):
 
         freq_bands_table = QtWidgets.QTableView()
         freq_bands_table.setModel(freq_bands_model)
-        freq_bands_table.setColumnHidden(2, True)
-        freq_bands_table.setColumnHidden(3, True)
+        # freq_bands_table.setColumnHidden(2, True)
+        # freq_bands_table.setColumnHidden(3, True)
         measurements_layout.addWidget(freq_bands_table)
         
         # Thresholds
@@ -440,6 +451,7 @@ class GraphWindow(QtWidgets.QWidget):
     def startCapture(self):
         if not self.is_capturing:
             self.initializeGraphs()
+            self.initializeModels()
             self.initializeWorker()
         else:
             self.restart_queued = True
@@ -470,6 +482,10 @@ class GraphWindow(QtWidgets.QWidget):
         if self.restart_queued:
             self.initializeGraphs()
             self.initializeWorker()
+    
+    def initializeModels(self):
+        for row in range(self.freq_bands_model.rowCount()):
+            self.freq_bands_model.setThresholdState(row, False)
 
     # Initialize data worker and thread
     def initializeWorker(self):
@@ -521,13 +537,13 @@ class TableModel(QtCore.QAbstractTableModel):
         self._data = data
     
     # Our table is stored as row-major, so we just need the array's length
-    def rowCount(self, parent):
+    def rowCount(self, parent = QtCore.QModelIndex()):
         if parent.isValid():
             return 0
         return len(self._data)
 
     # We assume all subarrays are the correct size in our _data array.
-    def columnCount(self, parent):
+    def columnCount(self, parent = QtCore.QModelIndex()):
         if parent.isValid():
             return 0
         return len(self._data[0])
@@ -576,6 +592,11 @@ class FreqTableModel(TableModel):
         elif value < self.data(index.siblingAtColumn(2)).value():
             self.thresholdChanged.emit(index, False)
             self.setData(index.siblingAtColumn(3), False)
+
+    # Allow us to reset the threshold state when starting a new capture
+    def setThresholdState(self, row, state):
+        idx = self.index(row, 3)
+        self.setData(idx, state)
 
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()
