@@ -477,8 +477,6 @@ class GraphWindow(QtWidgets.QWidget):
         self.initializePlotWidgets()
         if not self.settings['fft']['welch_enabled']:
             self.fft_plot.hide()
-        if not global_vars.DEBUG:
-            self.sock.close()
         if self.restart_queued:
             self.initializeGraphs()
             self.initializeWorker()
