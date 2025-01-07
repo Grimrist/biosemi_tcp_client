@@ -172,8 +172,7 @@ class DataWorker(QtCore.QObject):
                             if cuda_enabled:
                                 self.data_connectors[n + (total_channels)].cb_set_data(log_pxx.get(), f.get())
                             else: 
-                                for i, channel in enumerate(active_channels):
-                                    self.data_connectors[channel + (total_channels)].cb_set_data(log_pxx, f)
+                                self.data_connectors[channel + (total_channels)].cb_set_data(log_pxx, f)
                             for band, [lower, upper] in global_vars.FREQ_BANDS.items():
                                 freq_filter = (f >= lower) & (f <= upper)
                                 band_values = pxx[freq_filter]

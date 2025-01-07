@@ -64,7 +64,7 @@ class DebugWorker(QtCore.QObject):
     def generateSignalFromFile(self):
         self.terminated = False
         total_channels = self.electrodes_model.rowCount()
-        f = pyedflib.EdfReader("../files/S001/S001R01.edf")
+        f = pyedflib.EdfReader("../files/S002/S002R02.edf")
         n = f.signals_in_file
         signal_labels = f.getSignalLabels()
         sigbufs = numpy.zeros((n, f.getNSamples()[0]), dtype=numpy.int16)
