@@ -136,17 +136,17 @@ class DataWorker(QtCore.QObject):
                     # the first sample of each channel is sent, then the second sample, and so on.
                     # First we reshape the matrix such that each row is one 24-bit integer
                     start_test = perf_counter_ns()
-                    deinterleave_data = numpy.frombuffer(buffer=data, dtype='<b').reshape(-1, 3)
+                    reshaped_data = numpy.frombuffer(buffer=data, dtype='<b').reshape(-1, 3)
                     # De-interleave by transposing (Fortran order) and then reshaping into (channels * samples * bytes) shaped array
-                    reshaped_data = deinterleave_data.reshape((total_channels, self.samples, 3), order='F')
+                    deinterleave_data = reshaped_data.reshape((total_channels, self.samples, 3), order='F')
                     # Copy bytes into new 4-byte array, change view to uint32, filter by only the channels we need and squeeze dimensions
-                    a[:,:,-3:] = reshaped_data
+                    a[:,:,-3:] = deinterleave_data
                     samples = a.view('int32')[[active_channels], :].reshape(len(active_channels), self.samples)
                     stop_test = perf_counter_ns()
                     # print("My method (ms):", (stop_test - start_test)/(10**6))
                     # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
                     if(active_reference > -1):
-                        ref_data = reshaped_data[active_reference, :].reshape(1, self.samples)
+                        ref_values = a.view('int32')[active_reference, :].reshape(1, self.samples)
                     else:
                         ref_values = numpy.zeros(self.samples)
 
