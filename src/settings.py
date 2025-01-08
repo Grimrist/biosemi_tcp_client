@@ -9,29 +9,6 @@ class SettingsHandler():
     def __init__(self, file_name, settings):
         self.file_name = file_name
         self.settings = settings
-        # Define our default settings, and then overwrite them with whatever is saved in settings
-        # This should prevent a broken settings file from breaking the whole program
-        self.settings['socket'] = {}
-        self.settings['socket']['ip'] = "127.0.0.1"
-        self.settings['socket']['port'] = 8888
-        self.settings['biosemi'] = {}
-        self.settings['biosemi']['phys_max'] = 262143 # Physical maximum value
-        self.settings['biosemi']['phys_min'] = -262144 # Physical minimum value
-        self.settings['biosemi']['digi_max'] = 8388607 # Digital maximum value
-        self.settings['biosemi']['digi_min'] = -8388608 # Digital minimum value
-        self.settings['biosemi']['fs'] = 16000 # Sampling rate
-        self.settings['biosemi']['channels'] = {'A': 32, 'B': 32, 'EX': 8} # (Set, Amount)
-        self.settings['biosemi']['ex_enabled'] = False
-        self.settings['biosemi']['samples'] = 64 # Samples per channel
-        self.settings['filter'] = {}
-        self.settings['filter']['decimating_factor'] = 16 # Decimating factor
-        self.settings['filter']['lowpass_taps'] = 15 # Taps used for anti-aliasing filter
-        self.settings['fft'] = {}
-        self.settings['fft']['welch_enabled'] = False
-        self.settings['fft']['welch_window'] = 64*16
-        self.settings['threshold'] = {}
-        self.settings['threshold']['alpha'] = 0.5
-
         try:
             with open(self.file_name, 'r') as file:
                 # Since settings are a dictionary, we update across all "categories" of our settings
@@ -45,6 +22,28 @@ class SettingsHandler():
         except ValueError:
             # Settings file is broken, so we ignore it
             pass
+        # Define our default settings, and then overwrite them with whatever is saved in settings
+        # This should prevent a broken settings file from breaking the whole program
+        self.settings.setdefault("socket", {})
+        self.settings['socket'].setdefault("ip", "127.0.0.1")
+        self.settings['socket'].setdefault("port", 8888)
+        self.settings.setdefault("biosemi", {})
+        self.settings['biosemi'].setdefault("phys_max", 262143)
+        self.settings['biosemi'].setdefault("phys_min", -262144)
+        self.settings['biosemi'].setdefault("digi_max", 8388607)
+        self.settings['biosemi'].setdefault("digi_min", -8388608)
+        self.settings['biosemi'].setdefault("fs", 2048)
+        self.settings['biosemi'].setdefault("channels", {'A': 32, 'B': 32, 'EX': 8}) # (Set, Amount)
+        self.settings['biosemi'].setdefault("ex_enabled", False)
+        self.settings['biosemi'].setdefault("samples", 64)
+        self.settings.setdefault("filter", {})
+        self.settings['filter'].setdefault("decimating_factor", 1)
+        self.settings['filter'].setdefault("lowpass_taps", 101)
+        self.settings.setdefault("fft", {})
+        self.settings['fft'].setdefault("welch_enabled", True)
+        self.settings['fft'].setdefault("welch_window", 2048*4)
+        self.settings.setdefault("threshold", {})
+        self.settings['threshold'].setdefault("alpha", 0.5)
 
     def saveSettings(self):
         try:
