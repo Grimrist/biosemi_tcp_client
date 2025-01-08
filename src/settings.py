@@ -44,6 +44,10 @@ class SettingsHandler():
         self.settings['fft'].setdefault("welch_window", 2048*4)
         self.settings.setdefault("threshold", {})
         self.settings['threshold'].setdefault("alpha", 0.5)
+        self.settings.setdefault("serial", {})
+        self.settings['serial'].setdefault("enabled", True)
+        self.settings['serial'].setdefault("port", "ttyUSB0")
+        self.settings['serial'].setdefault("baud_rate", '115200')
 
     def saveSettings(self):
         try:
@@ -105,3 +109,14 @@ class SettingsHandler():
     def setAlphaThreshold(self, value):
         self.settings['threshold']['alpha'] = float(value)
         
+    def setSerialEnabled(self, enable):
+        if(enable == Qt.CheckState.Checked):
+            self.settings['serial']['enabled'] = True
+        else:
+            self.settings['serial']['enabled'] = False
+
+    def setSerialPort(self, port):
+        self.settings['serial']['port'] = str(port)
+
+    def setBaudRate(self, baud):
+        self.settings['serial']['baud_rate'] = str(baud)

@@ -12,10 +12,10 @@ void loop()
     buffer = Serial.read();
     Serial.print("I received: ");
     Serial.println(buffer, DEC);
-    if(buffer == 1) {
+    if(buffer == 'a') {
       digitalWrite(13, HIGH);
     }
-    else if(buffer == 0) {
+    else if(buffer == 'b') {
       digitalWrite(13, LOW);
     }
   }

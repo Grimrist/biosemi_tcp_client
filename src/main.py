@@ -1,7 +1,7 @@
 import socket   # used for TCP/IP communication
 from settings import SettingsHandler    
 import sys
-from PyQt6 import QtWidgets, QtCore, QtGui
+from PyQt6 import QtWidgets, QtCore, QtGui, QtSerialPort
 import pyqtgraph
 # try:
 #     import cupy
@@ -22,6 +22,8 @@ import global_vars
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
     global_vars.DEBUG = True
     from debug_source import DebugWorker
+
+from serial import SerialHandler
 
 # MainWindow holds all other windows, initializes the settings,
 # and connects every needed signal to its respective slot.
@@ -47,15 +49,20 @@ class MainWindow(QtWidgets.QMainWindow):
         # Load settings
         self.settings = {}
         self.settings_handler = SettingsHandler("settings.json", self.settings)
+        
         # Initialize main window
         self.setWindowTitle("Biosemi TCP Reader")
         main_widget = QtWidgets.QWidget()
         main_layout = QtWidgets.QHBoxLayout()
+
         # Initialize models
         self.electrodes_model = None
         self.initializeElectrodes()
         self.freq_bands_model = None
         self.initializeBands()
+
+        # Initialize serial handler
+        self.serial_handler = SerialHandler(self.settings['serial']['enabled'])
 
         # Initialize selection window and graph display window
         self.selection_window = SelectionWindow(self.settings, self.electrodes_model, self.freq_bands_model)
@@ -92,6 +99,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # FFT settings
         self.selection_window.welch_window_box.valueChanged.connect(self.settings_handler.setWelchWindow)
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.settings_handler.setWelchEnabled)
+
+        # Serial settings
+        self.selection_window.serial_port_box.currentTextChanged.connect(self.settings_handler.setSerialPort)
+        self.selection_window.serial_baud_box.currentTextChanged.connect(self.settings_handler.setBaudRate)
+        self.selection_window.serial_checkbox.checkStateChanged.connect(self.settings_handler.setSerialEnabled)
+        self.selection_window.serial_checkbox.checkStateChanged.connect(self.serial_handler.setWriteEnabled)
+        self.graph_window.captureStarted.connect(self.startSerial)
+        self.graph_window.captureStopped.connect(self.serial_handler.stopSerial)
+        self.selection_window.sendSerial.connect(self.serial_handler.write)
 
         # Thresholds
         # Just a quick prototype, this needs more robust support
@@ -158,19 +174,25 @@ class MainWindow(QtWidgets.QMainWindow):
         for i in selection.indexes():
             self.electrodes_model.itemFromIndex(i.siblingAtColumn(2)).setData(QtCore.QVariant(True))
 
+    def startSerial(self):
+        port = self.settings['serial']['port']
+        baud = int(self.settings['serial']['baud_rate'])
+        self.serial_handler.startSerial(port, baud)
+
     def closeEvent(self, event):
         self.settings_handler.saveSettings()
         self.graph_window.stopCapture()
-        event.accept()
+        event.accept()        
 
 # SelectionWindow implements all the configuration UI,
 # as well as handling its' display on the interface.
 # Pending to implement: QScrollArea to contain all the widgets,
 # to allow adding even more options.
 class SelectionWindow(QtWidgets.QTabWidget):
+    sendSerial = QtCore.pyqtSignal(bytes)
+
     def __init__(self, settings, electrodes_model, freq_bands_model):
         super().__init__()
-        self.initializeSerial()
         self.settings = settings
         self.electrodes_model = electrodes_model
         self.freq_bands_model = freq_bands_model
@@ -308,6 +330,37 @@ class SelectionWindow(QtWidgets.QTabWidget):
         button_widget.setLayout(button_layout)
         selection_layout.addWidget(button_widget)
 
+        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        selection_layout.addItem(verticalSpacer) 
+
+        # Serial configuration
+        serial_frame = QtWidgets.QFrame()
+        serial_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
+        serial_layout = QtWidgets.QVBoxLayout()
+        serial_frame.setLayout(serial_layout)
+        selection_layout.addWidget(serial_frame)
+        self.serial_port_box = QtWidgets.QComboBox()
+        for port in QtSerialPort.QSerialPortInfo().availablePorts():
+            self.serial_port_box.addItem(port.portName())
+        serial_layout.addWidget(self.serial_port_box)
+        idx = self.serial_port_box.findText(self.settings['serial']['port'])
+        if not idx == -1:
+            self.serial_port_box.setCurrentIndex(idx)
+
+        self.serial_baud_box = QtWidgets.QComboBox()
+        for baud_rate in QtSerialPort.QSerialPortInfo().standardBaudRates():
+            self.serial_baud_box.addItem(str(baud_rate))
+        idx = self.serial_baud_box.findText(self.settings['serial']['baud_rate'])
+        if not idx == -1:
+            self.serial_baud_box.setCurrentIndex(idx)
+        
+        serial_layout.addWidget(self.serial_baud_box)
+
+        self.serial_checkbox = QtWidgets.QCheckBox()
+        self.serial_checkbox.setText("Enable serial")
+        self.serial_checkbox.setChecked(self.settings['serial']['enabled'])
+        serial_layout.addWidget(self.serial_checkbox)
+
         settings_window.setLayout(selection_layout)
         self.addTab(settings_window, "Settings")
 
@@ -353,7 +406,7 @@ class SelectionWindow(QtWidgets.QTabWidget):
 
     def updateThresholdDisplay(self, index, status):
         band = self.band_indicators[index.row()][0].text().split()[0]
-        if status == True:
+        if status:
             self.band_indicators[index.row()][0].setText(band + " over threshold")
             self.band_indicators[index.row()][1].setPixmap(self.red_icon)
         else:
@@ -361,18 +414,11 @@ class SelectionWindow(QtWidgets.QTabWidget):
             self.band_indicators[index.row()][1].setPixmap(self.black_icon)
 
         ## Temporary placement, this might need its own thread
-        if self.serial_port.is_open:
+        if band == "Alpha":
             if status:
-                self.serial_port.write(b'\x01')
+                self.sendSerial.emit(b'a')
             else:
-                self.serial_port.write(b'\x00')
-
-    def initializeSerial(self):
-        try:
-            self.serial_port = serial.Serial('/dev/ttyUSB0', 115200)
-        except serial.serialutil.SerialException:
-            print('\033[91m' + "Failed to open serial port!" + '\033[0m')
-            self.serial_port = serial.Serial()
+                self.sendSerial.emit(b'b')
 
     def setAlphaThreshold(self, value):
         alpha = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, "Alpha")[0]
@@ -381,6 +427,9 @@ class SelectionWindow(QtWidgets.QTabWidget):
 # GraphWindow currently serves the dual purpose of handling the graph display as well as
 # implementing the plotting logic itself. It might be a good idea to separate the two
 class GraphWindow(QtWidgets.QWidget):
+    captureStarted = QtCore.pyqtSignal()
+    captureStopped = QtCore.pyqtSignal()
+
     def __init__(self, settings, electrodes_model, freq_bands_model):
         super().__init__()
         self.settings = settings
@@ -413,7 +462,7 @@ class GraphWindow(QtWidgets.QWidget):
         fft_plot_bottom_axis = LiveAxis("bottom", tick_angle=45)
         fft_plot_left_axis = LiveAxis("left")
         self.fft_plot = CustomLivePlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
-        self.fft_plot.setLogMode(True, False)
+        self.fft_plot.setLogMode(False, False)
         self.fft_plot.getAxis('bottom').enableAutoSIPrefix(False)
         self.fft_plot.getAxis('left').enableAutoSIPrefix(False)
         self.fft_plot.setLabel('bottom', "Frequency", "Hz")
@@ -451,11 +500,12 @@ class GraphWindow(QtWidgets.QWidget):
     def startCapture(self):
         if not self.is_capturing:
             self.initializeGraphs()
-            self.initializeModels()
+            self.disableThresholds()
             self.initializeWorker()
         else:
             self.restart_queued = True
             self.stopCapture()
+        self.captureStarted.emit()
 
     def stopCapture(self):
         if not self.is_capturing:
@@ -463,6 +513,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.worker.terminate()
         if global_vars.DEBUG:
             self.debug_worker.terminate()
+        self.captureStopped.emit()
 
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
@@ -481,7 +532,7 @@ class GraphWindow(QtWidgets.QWidget):
             self.initializeGraphs()
             self.initializeWorker()
     
-    def initializeModels(self):
+    def disableThresholds(self):
         for row in range(self.freq_bands_model.rowCount()):
             self.freq_bands_model.setThresholdState(row, False)
 
