@@ -80,7 +80,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.port_box.textChanged.connect(self.settings_handler.setPort)
         self.selection_window.samples_box.textChanged.connect(self.settings_handler.setSamples)
         self.selection_window.fs_box.textChanged.connect(self.settings_handler.setFs)
-        self.selection_window.channels_box.currentTextChanged.connect(self.setTotalChannels)
+        self.selection_window.channels_box.textActivated.connect(self.setTotalChannels)
         self.selection_window.ex_electrodes_box.checkStateChanged.connect(self.setExEnabled)
 
         # Graph control
@@ -101,8 +101,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.settings_handler.setWelchEnabled)
 
         # Serial settings
-        self.selection_window.serial_port_box.currentTextChanged.connect(self.settings_handler.setSerialPort)
-        self.selection_window.serial_baud_box.currentTextChanged.connect(self.settings_handler.setBaudRate)
+        self.selection_window.serial_port_box.textActivated.connect(self.settings_handler.setSerialPort)
+        self.selection_window.serial_baud_box.textActivated.connect(self.settings_handler.setBaudRate)
         self.selection_window.serial_checkbox.checkStateChanged.connect(self.settings_handler.setSerialEnabled)
         self.selection_window.serial_checkbox.checkStateChanged.connect(self.serial_handler.setWriteEnabled)
         self.graph_window.captureStarted.connect(self.startSerial)

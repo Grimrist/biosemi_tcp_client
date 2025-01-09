@@ -10,9 +10,10 @@ class SerialHandler(QtCore.QObject):
         self.serial = QtSerialPort.QSerialPort(port)
         self.serial.setBaudRate(baud)
         self.is_open = self.serial.open(QtCore.QIODeviceBase.OpenModeFlag.WriteOnly)
-        self.serial.readyRead.connect(self.read)
+        #self.serial.readyRead.connect(self.read)
         if not self.is_open:
             print('\033[91m' + "Failed to open serial port!" + '\033[0m')
+            print("Error:", self.serial.errorString())
             return
 
     def stopSerial(self):
