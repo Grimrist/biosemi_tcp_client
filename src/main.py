@@ -150,7 +150,7 @@ class MainWindow(QtWidgets.QMainWindow):
             for k in global_vars.FREQ_BANDS.keys():
                 if k == "Alpha":
                     data.append([k, 0, self.settings['threshold']['alpha'], False])
-                else: data.append([k, 0, 0.5, False])
+                else: data.append([k, 0, 1, False])
             self.freq_bands_model = FreqTableModel(data, ["Bands", "Relative Power", "Threshold", "Status"])
 
     def setTotalChannels(self, channels):
@@ -196,6 +196,10 @@ class SelectionWindow(QtWidgets.QTabWidget):
         self.settings = settings
         self.electrodes_model = electrodes_model
         self.freq_bands_model = freq_bands_model
+        # Timer to ensure serial doesn't fire too easily
+        self.timer = QtCore.QTimer()
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(1000)
         # Two tabs: one for settings, the other for value monitoring
         ## Settings tab
         settings_window = QtWidgets.QWidget()
@@ -416,9 +420,15 @@ class SelectionWindow(QtWidgets.QTabWidget):
         ## Temporary placement, this might need its own thread
         if band == "Alpha":
             if status:
-                self.sendSerial.emit(b'a')
+                self.sendEnableSignal()
             else:
-                self.sendSerial.emit(b'b')
+                self.sendDisableSignal()
+
+    def sendDisableSignal(self):
+        self.sendSerial.emit(b'0')
+
+    def sendEnableSignal(self):
+        self.sendSerial.emit(b'1')
 
     def setAlphaThreshold(self, value):
         alpha = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, "Alpha")[0]
@@ -462,7 +472,7 @@ class GraphWindow(QtWidgets.QWidget):
         fft_plot_bottom_axis = LiveAxis("bottom", tick_angle=45)
         fft_plot_left_axis = LiveAxis("left")
         self.fft_plot = CustomLivePlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
-        self.fft_plot.setLogMode(False, False)
+        self.fft_plot.setLogMode(True, False)
         self.fft_plot.getAxis('bottom').enableAutoSIPrefix(False)
         self.fft_plot.getAxis('left').enableAutoSIPrefix(False)
         self.fft_plot.setLabel('bottom', "Frequency", "Hz")
@@ -500,7 +510,6 @@ class GraphWindow(QtWidgets.QWidget):
     def startCapture(self):
         if not self.is_capturing:
             self.initializeGraphs()
-            self.disableThresholds()
             self.initializeWorker()
         else:
             self.restart_queued = True
@@ -514,6 +523,7 @@ class GraphWindow(QtWidgets.QWidget):
         if global_vars.DEBUG:
             self.debug_worker.terminate()
         self.captureStopped.emit()
+        self.disableThresholds()
 
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
@@ -533,6 +543,7 @@ class GraphWindow(QtWidgets.QWidget):
             self.initializeWorker()
     
     def disableThresholds(self):
+        print("Disabling thresholds")
         for row in range(self.freq_bands_model.rowCount()):
             self.freq_bands_model.setThresholdState(row, False)
 
@@ -647,6 +658,7 @@ class FreqTableModel(TableModel):
     def setThresholdState(self, row, state):
         idx = self.index(row, 3)
         self.setData(idx, state)
+        self.thresholdChanged.emit(idx, False)
 
 app = QtWidgets.QApplication(sys.argv)
 window = MainWindow()

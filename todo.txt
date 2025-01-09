@@ -15,7 +15,4 @@
     - Minimum length of trigger: 1ms
 - Potentially use CUDA to speed everything up
     - Testing showed it to actually be slower, surprisingly
-- Use the internet's method for the 24bit interleave because I'm clearly not smart enough
-- Add button to disable serial pulses
-- Notify serial port of capture ending (disable the pulse)
 - Add controller thread to finally solve all the annoying issues trying to start/stop the workers

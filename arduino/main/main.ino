@@ -1,5 +1,8 @@
-char buffer = 0;
-
+char buffer;
+long timer = 0;
+long interval = 1000;
+int writeSignal = LOW;
+unsigned long current = 0;
 void setup()
 {
   pinMode(13, OUTPUT);
@@ -8,15 +11,18 @@ void setup()
 
 void loop()
 {
+  current = millis();
+  if(current >= timer+interval) {
+    digitalWrite(13, writeSignal);
+  }
   if (Serial.available() > 0) {
+    timer = millis();
     buffer = Serial.read();
-    Serial.print("I received: ");
-    Serial.println(buffer, DEC);
-    if(buffer == 'a') {
-      digitalWrite(13, HIGH);
+    if(buffer == '1') {
+      writeSignal = HIGH;
     }
-    else if(buffer == 'b') {
-      digitalWrite(13, LOW);
+    else if(buffer == '0') {
+      writeSignal = LOW;
     }
   }
 }

@@ -166,7 +166,7 @@ class DataWorker(QtCore.QObject):
                                 active_buffers.append(welch_buffers[channel])
                             active_buffers = numpy.vstack(active_buffers)
                             avg_buffer = numpy.average(active_buffers, axis=0)
-                            f, pxx = signal.welch(x=avg_buffer, fs=self.fs, nperseg=welch_window/5)
+                            f, pxx = signal.welch(x=avg_buffer, fs=self.fs, nperseg=welch_window//5)
                             pxx[pxx == 0] = 0.0000000001
                             log_pxx = 10*numpy.log10(pxx*1000)
                             if cuda_enabled:
