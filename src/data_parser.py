@@ -24,32 +24,21 @@ fft.set_global_backend(pyfftw.interfaces.scipy_fft)
 pyfftw.interfaces.cache.enable()
 pyfftw.interfaces.cache.set_keepalive_time(3)
 
-## Controller for the worker so we don't hang the thread when we need stuff to happen
-
 ## Class definition for thread that receives data
 # This was decoupled from the main application as it needed some custom signals for proper termination
 class DataWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
+    finishedCapture = QtCore.pyqtSignal()
     error = QtCore.pyqtSignal(str)
 
     def __init__(self, settings, electrodes_model, freq_bands_model, plots, data_connectors):
         super().__init__()
-        ## Initialize all data derived from the client configuration
-        self.samples = settings['biosemi']['samples']
-        self.fs = settings['biosemi']['fs']
         # Give worker access to the models we use
+        self.settings = settings
         self.electrodes_model = electrodes_model
         self.freq_bands_model = freq_bands_model
         self.plots = plots
         self.data_connectors = data_connectors
-        # Gain calculation to map quantized values to actual voltage (in uV)
-        phys_range = settings['biosemi']['phys_max'] - settings['biosemi']['phys_min']
-        digi_range = settings['biosemi']['digi_max'] - settings['biosemi']['digi_min']
-        self.gain = phys_range/(digi_range * 2**8)
-        # Network information
-        self.ip = settings['socket']['ip']
-        self.port = settings['socket']['port']
-        self.settings = settings
 
     def setCapturing(self, status):
         self.is_capturing = status
@@ -57,13 +46,39 @@ class DataWorker(QtCore.QObject):
     def startSocket(self, ip, port, buffer_size):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, buffer_size)
-        self.sock.connect((ip, port))
+        attempt_count = 0
+        while True:
+            try:
+                self.sock.connect((ip, port))
+            except ConnectionRefusedError:
+                print("Failed to connect, attempting again")
+                attempt_count += 1
+                sleep(0.2)
+                if attempt_count > 3:
+                    return False
+                pass
+            else: 
+                print("Reading from ip %s and port %d" % (ip, port))
+                return True
 
     def terminate(self):
         self.is_capturing = False
 
+    def initializeData(self, settings, electrodes_model, freq_bands_model):
+        ## Initialize all data derived from the client configuration
+        self.samples = settings['biosemi']['samples']
+        self.fs = settings['biosemi']['fs']
+        # Gain calculation to map quantized values to actual voltage (in uV)
+        phys_range = settings['biosemi']['phys_max'] - settings['biosemi']['phys_min']
+        digi_range = settings['biosemi']['digi_max'] - settings['biosemi']['digi_min']
+        self.gain = phys_range/(digi_range * 2**8)
+        # Network information
+        self.ip = settings['socket']['ip']
+        self.port = settings['socket']['port']
+
     def readData(self):
         global cuda_enabled
+        self.initializeData(self.settings, self.electrodes_model, self.freq_bands_model)
         x = 0
         packet_failed = 0
         decimate_enabled = False
@@ -73,7 +88,11 @@ class DataWorker(QtCore.QObject):
         total_channels = self.electrodes_model.rowCount()
         buffer_size = total_channels * self.samples * 3
         # Start our socket with the right buffer limit
-        self.startSocket(self.ip, self.port, buffer_size*2)
+        if not self.startSocket(self.ip, self.port, buffer_size*2):
+            print("Failed to connect, stopping capture")
+            self.finishedCapture.emit()
+            self.sock.close()
+            return
         # Forcing this to true for now, might add a hard disable later
         welch_enabled = True
         welch_window = self.settings['fft']['welch_window']
@@ -117,10 +136,20 @@ class DataWorker(QtCore.QObject):
             self.data_connectors[i].resume()
             self.plots[i+total_channels].show()
             self.data_connectors[i+total_channels].resume()
-
+        attempt_counter = 0
         self.is_capturing = True
         while True:
             recv_data = self.sock.recv(buffer_size*2)
+            if not recv_data:
+                attempt_counter += 1
+                print("Empty packet, attempting to read again")
+                sleep(0.2)
+                if attempt_counter > 3:
+                    print("Failed to receive data, closing connection")
+                    self.sock.close()
+                    self.finishedCapture.emit()
+                    return
+                pass
             start_total = perf_counter_ns()
             # if(len(recv_data) > buffer_size):
                 # print("recv_data length:", len(recv_data), "buffer size", buffer_size)
@@ -197,11 +226,12 @@ class DataWorker(QtCore.QObject):
                         # else:
                     start = perf_counter_ns()
                     for i, channel in enumerate(active_channels):
-                        # print("Samples:", samples)
                         self.data_connectors[channel].cb_append_data_array(samples[i], samples_time)
 
                     if not self.is_capturing:
-                        self.finished.emit()
+                        print("Stopping worker by request")
+                        self.sock.close()
+                        self.finishedCapture.emit()
                         return
                     stop = perf_counter_ns()
                     # print("Allocate data (ms):", (stop - start)/(10**6))
@@ -214,7 +244,8 @@ class DataWorker(QtCore.QObject):
                     print("Packet reading failed! Failed attempts:", packet_failed)
                     if packet_failed > global_vars.MAX_ERRORS:
                         print("Failed to read packets too many times, dropping connection")
-                        self.finished.emit()
+                        self.sock.close()
+                        self.finishedCapture.emit()
                         return
             stop_total = perf_counter_ns()
             # print("Total time (ms):", (stop_total - start_total)/(10**6))

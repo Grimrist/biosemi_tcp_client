@@ -16,3 +16,4 @@
 - Potentially use CUDA to speed everything up
     - Testing showed it to actually be slower, surprisingly
 - Add controller thread to finally solve all the annoying issues trying to start/stop the workers
+    - I tried to not do this and wound up paying the price because I _need_ the debug thread to open its socket before the data capture starts

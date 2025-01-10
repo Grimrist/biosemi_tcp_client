@@ -6,14 +6,12 @@ import pyedflib
 
 # Worker class for opening a socket and generating a sine wave to read from
 class DebugWorker(QtCore.QObject):
+    finishedRead = QtCore.pyqtSignal()
     finished = QtCore.pyqtSignal()
 
     def __init__(self, settings, electrodes_model):
         super().__init__()
-        port = settings['socket']['port']
-        self.openSocket(port)
-        self.samples = settings['biosemi']['samples']
-        self.fs = settings['biosemi']['fs']
+        self.settings = settings
         self.electrodes_model = electrodes_model
 
     def openSocket(self, port):
@@ -27,7 +25,14 @@ class DebugWorker(QtCore.QObject):
     def terminate(self):
         self.terminated = True
 
+    def initializeData(self, settings):
+        self.port = settings['socket']['port']
+        self.samples = settings['biosemi']['samples']
+        self.fs = settings['biosemi']['fs']
+
     def generateSignal(self):
+        self.initializeData(self.settings)
+        self.openSocket(self.port)
         self.terminated = False
         (client, port) = self.sock.accept()
         total_channels = self.electrodes_model.rowCount()
@@ -50,11 +55,11 @@ class DebugWorker(QtCore.QObject):
             if sent == 0:
                 print("No data sent, terminating!")
                 self.sock.close()
-                self.finished.emit()
+                self.finishedRead.emit()
                 return
             if self.terminated:
                 print("Terminating debug thread!")
-                self.finished.emit()
+                self.finishedRead.emit()
                 return
 
             t += self.samples/self.fs
@@ -62,6 +67,8 @@ class DebugWorker(QtCore.QObject):
             sleep(self.samples/self.fs)
 
     def generateSignalFromFile(self):
+        self.initializeData(self.settings)
+        self.openSocket(self.port)
         self.terminated = False
         total_channels = self.electrodes_model.rowCount()
         f = pyedflib.EdfReader("../files/S001/S001R02.edf")
@@ -80,20 +87,22 @@ class DebugWorker(QtCore.QObject):
                 sigbufs_bytes.extend(val)
         (client, port) = self.sock.accept()
         for i in range(0, file_length):
-            # print("Sending data", sigbufs_bytes[(i*self.samples*total_channels*3):((i+1)*self.samples*total_channels*3)])
-            # print(self.samples, self.fs)
-            # print("Slices:", (i*self.samples*total_channels*3), ((i+1)*self.samples*total_channels*3))
             sent = client.send(sigbufs_bytes[(i*self.samples*total_channels*3):((i+1)*self.samples*total_channels*3)])
             if sent == 0:
                 print("No data sent, terminating!")
                 self.sock.close()
-                self.finished.emit()
+                f.close()
+                self.finishedRead.emit()
                 return
             if self.terminated:
                 print("Terminating debug thread!")
-                self.finished.emit()
+                self.sock.close()
+                f.close()
+                self.finishedRead.emit()
                 return
             sleep(self.samples/self.fs)
         print("No more file to read, terminating")
-        self.finished.emit()
+        self.sock.close()
+        f.close()
+        self.finishedRead.emit()
         return

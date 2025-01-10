@@ -89,6 +89,9 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
         self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
+        if global_vars.DEBUG:
+            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignalFromFile)
+        self.graph_window.captureStarted.connect(self.graph_window.worker.readData)
 
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.graph_window.toggleFFT)
 
@@ -344,13 +347,14 @@ class SelectionWindow(QtWidgets.QTabWidget):
         serial_frame.setLayout(serial_layout)
         selection_layout.addWidget(serial_frame)
         self.serial_port_box = QtWidgets.QComboBox()
+        self.serial_port_box.addItem(" ")
         for port in QtSerialPort.QSerialPortInfo().availablePorts():
             self.serial_port_box.addItem(port.portName())
         serial_layout.addWidget(self.serial_port_box)
         idx = self.serial_port_box.findText(self.settings['serial']['port'])
         if not idx == -1:
             self.serial_port_box.setCurrentIndex(idx)
-
+    
         self.serial_baud_box = QtWidgets.QComboBox()
         for baud_rate in QtSerialPort.QSerialPortInfo().standardBaudRates():
             self.serial_baud_box.addItem(str(baud_rate))
@@ -453,6 +457,9 @@ class GraphWindow(QtWidgets.QWidget):
         if not self.settings['fft']['welch_enabled']:
             self.fft_plot.hide()
         self.setLayout(self.graph_layout)
+        self.data_connectors = []
+        self.plots = []
+        self.initializeWorker()
 
     def toggleFFT(self, checked):
         if(checked == QtCore.Qt.CheckState.Checked):
@@ -485,8 +492,8 @@ class GraphWindow(QtWidgets.QWidget):
     def initializeGraphs(self):
         total_channels = self.electrodes_model.rowCount()
         fs = self.settings['biosemi']['fs']
-        self.data_connectors = []
-        self.plots = []
+        self.plots.clear()
+        self.data_connectors.clear()
         # Generate plots for time-domain graphing
         for i in range(total_channels):
             plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9))
@@ -510,29 +517,31 @@ class GraphWindow(QtWidgets.QWidget):
     def startCapture(self):
         if not self.is_capturing:
             self.initializeGraphs()
-            self.initializeWorker()
+            self.captureStarted.emit()
+            self.is_capturing = True
         else:
             self.restart_queued = True
             self.stopCapture()
-        self.captureStarted.emit()
 
     def stopCapture(self):
         if not self.is_capturing:
             return
+        self.is_capturing = False
         self.worker.terminate()
         if global_vars.DEBUG:
             self.debug_worker.terminate()
         self.captureStopped.emit()
-        self.disableThresholds()
 
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
     def cleanup(self):
+        print("Cleaning up")
         self.is_capturing = False
         for connector in self.data_connectors:
             connector.deleteLater()
         for plot in self.plots:
             plot.deleteLater()
+        self.disableThresholds()
         self.plot_widget.deleteLater()
         self.fft_plot.deleteLater()
         self.initializePlotWidgets()
@@ -540,8 +549,10 @@ class GraphWindow(QtWidgets.QWidget):
             self.fft_plot.hide()
         if self.restart_queued:
             self.initializeGraphs()
-            self.initializeWorker()
-    
+            self.captureStarted.emit()
+            self.is_capturing = True
+            self.restart_queued = False
+
     def disableThresholds(self):
         print("Disabling thresholds")
         for row in range(self.freq_bands_model.rowCount()):
@@ -554,26 +565,19 @@ class GraphWindow(QtWidgets.QWidget):
             self.debug_thread = QtCore.QThread()
             self.debug_worker = DebugWorker(self.settings, self.electrodes_model)
             self.debug_worker.moveToThread(self.debug_thread)
-            self.debug_thread.started.connect(self.debug_worker.generateSignalFromFile)
             self.debug_worker.finished.connect(self.debug_thread.quit)
             self.debug_worker.finished.connect(self.debug_worker.deleteLater)
             self.debug_thread.finished.connect(self.debug_thread.deleteLater)
-            self.debug_worker.finished.connect(self.stopCapture)
+            self.debug_worker.finishedRead.connect(self.stopCapture)
             self.debug_thread.start()
-
         self.data_thread = QtCore.QThread()
         self.worker = DataWorker(self.settings, self.electrodes_model, self.freq_bands_model, self.plots, self.data_connectors)
         self.worker.moveToThread(self.data_thread)
-        self.data_thread.started.connect(self.worker.readData)
         self.worker.finished.connect(self.data_thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
         self.data_thread.finished.connect(self.data_thread.deleteLater)
-        self.data_thread.finished.connect(self.cleanup)
+        self.worker.finishedCapture.connect(self.cleanup)
         self.data_thread.start()
-        print("Reading from ip %s and port %s" % (self.settings['socket']['ip'], self.settings['socket']['port']))
-        self.is_capturing = True
-        self.restart_queued = False
-
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):
