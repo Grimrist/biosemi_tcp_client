@@ -6,3 +6,4 @@ run_debug
 run_profiler
 profiler_results
 deinterleave.py
+test.py

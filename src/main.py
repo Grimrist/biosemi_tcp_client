@@ -90,7 +90,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
         self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
         if global_vars.DEBUG:
-            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignalFromFile)
+            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignal)
         self.graph_window.captureStarted.connect(self.graph_window.worker.readData)
 
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.graph_window.toggleFFT)

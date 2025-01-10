@@ -188,11 +188,11 @@ class DataWorker(QtCore.QObject):
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                     # Since we're working with an entire set of samples, we need the corresponding x values
                     samples_time = numpy.linspace(x/self.fs, (x+self.samples)/self.fs, num=self.samples)
+                    for i, channel in enumerate(active_channels):
+                        welch_buffers[channel].extend(samples[i])
+                        active_buffers.append(welch_buffers[channel])
                     if welch_enabled:
                         if x % update_rate == 0:
-                            for i, channel in enumerate(active_channels):
-                                welch_buffers[channel].extend(samples[i])
-                                active_buffers.append(welch_buffers[channel])
                             active_buffers = numpy.vstack(active_buffers)
                             avg_buffer = numpy.average(active_buffers, axis=0)
                             f, pxx = signal.welch(x=avg_buffer, fs=self.fs, nperseg=welch_window//5)
