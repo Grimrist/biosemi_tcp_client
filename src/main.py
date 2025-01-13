@@ -13,9 +13,9 @@ from pglive.sources.live_plot import LiveLinePlot
 from pglive.sources.live_plot_widget import LivePlotWidget
 from pglive.sources.live_axis_range import LiveAxisRange
 from pglive.sources.live_axis import LiveAxis
-import serial
 
 from data_parser import DataWorker
+from fft_parser import FFTWorker
 from custom_live_plot import CustomLivePlotWidget
 import global_vars
 
@@ -92,6 +92,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if global_vars.DEBUG:
             self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignal)
         self.graph_window.captureStarted.connect(self.graph_window.worker.readData)
+        self.graph_window.captureStarted.connect(self.graph_window.fft_worker.initializeWorker)
 
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.graph_window.toggleFFT)
 
@@ -476,6 +477,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.setLabel('bottom', "Time", "s")
         self.plot_widget.setLabel('left', "Magnitude", "uV")
         self.graph_layout.addWidget(self.plot_widget)
+
         fft_plot_bottom_axis = LiveAxis("bottom", tick_angle=45)
         fft_plot_left_axis = LiveAxis("left")
         self.fft_plot = CustomLivePlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
@@ -503,20 +505,18 @@ class GraphWindow(QtWidgets.QWidget):
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
             plot.hide()
-        # Generate plots for FFT graphing. We don't define max_points because we just set the data directly.
-        for i in range(total_channels):
-            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9))
-            data_connector = DataConnector(plot, plot_rate=45)
-            data_connector.pause()
-            self.data_connectors.append(data_connector)
-            self.plots.append(plot)
-            self.fft_plot.addItem(plot)
-            plot.hide()
+        # Generate plot for FFT graphing
+        plot = LiveLinePlot(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9))
+        data_connector = DataConnector(plot, plot_rate=45)
+        self.fft_data_connector = data_connector
+        self.plots.append(plot)
+        self.fft_plot.addItem(plot)
         return
 
     def startCapture(self):
         if not self.is_capturing:
             self.initializeGraphs()
+            self.fft_worker.setDataConnector(self.fft_data_connector)
             self.captureStarted.emit()
             self.is_capturing = True
         else:
@@ -549,6 +549,7 @@ class GraphWindow(QtWidgets.QWidget):
             self.fft_plot.hide()
         if self.restart_queued:
             self.initializeGraphs()
+            self.fft_worker.setDataConnector(self.fft_data_connector)
             self.captureStarted.emit()
             self.is_capturing = True
             self.restart_queued = False
@@ -577,7 +578,18 @@ class GraphWindow(QtWidgets.QWidget):
         self.worker.finished.connect(self.worker.deleteLater)
         self.data_thread.finished.connect(self.data_thread.deleteLater)
         self.worker.finishedCapture.connect(self.cleanup)
+
+        self.fft_thread = QtCore.QThread()
+        self.fft_worker = FFTWorker(self.settings, self.electrodes_model, self.freq_bands_model)
+        self.fft_worker.moveToThread(self.fft_thread)
+        self.fft_worker.finished.connect(self.fft_thread.quit)
+        self.fft_worker.finished.connect(self.fft_worker.deleteLater)
+        self.fft_thread.finished.connect(self.fft_thread.deleteLater)
+        self.worker.welchBufferChanged.connect(self.fft_worker.updateBuffers)
+        self.worker.triggerFFT.connect(self.fft_worker.plotFFT)
+        self.worker.finished.connect(self.fft_worker.terminate)
         self.data_thread.start()
+        self.fft_thread.start()
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):
