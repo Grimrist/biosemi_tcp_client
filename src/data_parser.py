@@ -118,6 +118,7 @@ class DataWorker(QtCore.QObject):
             self.plots[i].show()
             self.data_connectors[i].resume()
         attempt_counter = 0
+        sample_counter = 0
         self.is_capturing = True
 
         # Main data reception loop
@@ -173,17 +174,18 @@ class DataWorker(QtCore.QObject):
                     # Since we're working with an entire set of samples, we need the corresponding x values
                     samples_time = numpy.linspace(x/self.fs, (x+self.samples)/self.fs, num=self.samples)
 
-                    # if decimate_enabled:
-                    #     if zf[n] is None:
-                    #         zf[n] = signal.lfiltic(b=alias_filter, a=1, y=samples[0])
-                    #         self.data_connectors[n].cb_append_data_array(samples, samples_time)
-                    #     else: 
-                    #         [samples], zf[n] = signal.lfilter(b=alias_filter, a=1, x=[samples], zi=zf[n])
-                    #     if x % decimate_factor == 0:
-                    #         self.data_connectors[n].cb_append_data_array(samples, samples_time)
-                    # else:
                     for i, channel in enumerate(active_channels):
-                        self.data_connectors[channel].cb_append_data_array(samples[i], samples_time)
+                        if decimate_enabled:
+                            if zf[channel] is None:
+                                zf[channel] = signal.lfiltic(b=alias_filter, a=1, y=samples[i], x=samples[i])
+                                if sample_counter % decimate_factor < self.samples:
+                                    self.data_connectors[channel].cb_append_data_array(samples[i][sample_counter % decimate_factor::decimate_factor], samples_time[sample_counter % decimate_factor::decimate_factor])
+                            else: 
+                                samples_decimated, zf[channel] = signal.lfilter(b=alias_filter, a=1, x=samples[i], zi=zf[channel])
+
+                                self.data_connectors[channel].cb_append_data_array(samples_decimated[sample_counter % decimate_factor::decimate_factor], samples_time[sample_counter % decimate_factor::decimate_factor])
+                        else:
+                                self.data_connectors[channel].cb_append_data_array(samples[i], samples_time)
 
                     if welch_enabled:
                         # Update FFT worker's data storage
@@ -200,6 +202,7 @@ class DataWorker(QtCore.QObject):
                         return
 
                     x += self.samples
+                    sample_counter = (sample_counter + self.samples) % decimate_factor
                     if packet_failed > 0:
                         packet_failed -= 1
                     

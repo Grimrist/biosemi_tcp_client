@@ -18,3 +18,5 @@
 - Add controller thread to finally solve all the annoying issues trying to start/stop the workers
     - I tried to not do this and wound up paying the price because I _need_ the debug thread to open its socket before the data capture starts
     - Decided this isn't worth fixing because actual users won't be using the debug mode
+
+- Take a second look at decimation, I think it should be more performant now that we do it to entire groups of samples

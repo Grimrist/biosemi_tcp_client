@@ -3,6 +3,13 @@ from settings import SettingsHandler
 import sys
 from PyQt6 import QtWidgets, QtCore, QtGui, QtSerialPort
 import pyqtgraph
+
+pyqtgraph.setConfigOption('useOpenGL', True)
+pyqtgraph.setConfigOption('enableExperimental', True)
+pyqtgraph.setConfigOption('antialias', False)
+
+# pyqtgraph.setConfigOption('useNumba', True)
+
 # try:
 #     import cupy
 #     pyqtgraph.setConfigOptions(useCupy=true)
@@ -470,7 +477,8 @@ class GraphWindow(QtWidgets.QWidget):
 
     # Initializes the plot widgets, alongside their axis configuration
     def initializePlotWidgets(self):
-        self.plot_widget = CustomLivePlotWidget(title="EEG time-domain plot")
+        fs = self.settings['biosemi']['fs']
+        self.plot_widget = CustomLivePlotWidget(title="EEG time-domain plot", skipFiniteCheck=True, autoDownsample=True, downsampleMethod='subsample')
         self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
         self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
@@ -498,16 +506,17 @@ class GraphWindow(QtWidgets.QWidget):
         self.data_connectors.clear()
         # Generate plots for time-domain graphing
         for i in range(total_channels):
-            plot = LiveLinePlot(pen=pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9))
-            data_connector = DataConnector(plot, max_points=(fs*2)/self.settings['filter']['decimating_factor'], plot_rate=45, ignore_auto_range=True)
+            color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
+            plot = LiveLinePlot(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs', autoDownsample=True, downsampleMethod='subsample')
+            data_connector = DataConnector(plot, max_points=(fs*2)/self.settings['filter']['decimating_factor'], plot_rate=5, ignore_auto_range=True)
             data_connector.pause()
             self.data_connectors.append(data_connector)
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
             plot.hide()
         # Generate plot for FFT graphing
-        plot = LiveLinePlot(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9))
-        data_connector = DataConnector(plot, plot_rate=45)
+        plot = LiveLinePlot(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='pairs')
+        data_connector = DataConnector(plot, plot_rate=30)
         self.fft_data_connector = data_connector
         self.plots.append(plot)
         self.fft_plot.addItem(plot)
