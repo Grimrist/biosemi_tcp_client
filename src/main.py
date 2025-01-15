@@ -495,7 +495,6 @@ class GraphWindow(QtWidgets.QWidget):
         self._last_update = 0
         self._last_fft_update = 0
         self.time_buffer = RingBuffer(capacity=self.fs*2, dtype='float64')
-        self.time_buffer.extend(numpy.zeros(self.fs*2))
         # Generate plots for time-domain graphing
         self.buffers = []
         for i in range(total_channels):
@@ -505,7 +504,6 @@ class GraphWindow(QtWidgets.QWidget):
             self.plot_widget.addItem(plot)
             plot.hide()
             buffer = RingBuffer(capacity=self.fs*2, dtype='float64')
-            buffer.extend(numpy.zeros(self.fs*2))
             self.buffers.append(buffer)
         # Generate plot for FFT graphing
         self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='pairs')
@@ -589,8 +587,10 @@ class GraphWindow(QtWidgets.QWidget):
 
     # Time value should probably just depend on whatever is in the array
     def updatePlots(self, channels, data, time_range):
-        self.update_rate = 15
+        self.update_rate = 30
         self.time_buffer.extend(time_range)
+        if self.time_buffer.is_full:
+            self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + (time_range[1] - time_range[0])))
         for i, channel in enumerate(channels):
             self.buffers[i].extend(data[i])
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
