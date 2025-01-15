@@ -14,15 +14,15 @@ class DataWorker(QtCore.QObject):
     finishedCapture = QtCore.pyqtSignal()
     welchBufferChanged = QtCore.pyqtSignal(int, numpy.ndarray)
     triggerFFT = QtCore.pyqtSignal()
+    newDataReceived = QtCore.pyqtSignal(list, numpy.ndarray, numpy.ndarray)
 
-    def __init__(self, settings, electrodes_model, freq_bands_model, plots, data_connectors):
+    def __init__(self, settings, electrodes_model, freq_bands_model, plots):
         super().__init__()
         # Give worker access to the models we use
         self.settings = settings
         self.electrodes_model = electrodes_model
         self.freq_bands_model = freq_bands_model
         self.plots = plots
-        self.data_connectors = data_connectors
 
     def setCapturing(self, status):
         self.is_capturing = status
@@ -92,7 +92,7 @@ class DataWorker(QtCore.QObject):
         if decimate_factor > 1: 
             decimate_enabled = True
             alias_filter = signal.firwin(numtaps=self.settings['filter']['lowpass_taps'], cutoff=self.fs/decimate_factor, pass_zero='lowpass', fs=self.fs)
-        zf = [None for i in range(len(self.data_connectors))]
+        zf = [None for i in range(len(self.plots)-1)]
 
         # Determine which channels we're interested in reading from
         for i in range(total_channels):
@@ -113,10 +113,8 @@ class DataWorker(QtCore.QObject):
             return
 
         # Enable connectors that we will be using
-        self.data_connectors[active_channels[0]].ignore_auto_range = False
         for i in active_channels:
             self.plots[i].show()
-            self.data_connectors[i].resume()
         attempt_counter = 0
         sample_counter = 0
         self.is_capturing = True
@@ -172,20 +170,9 @@ class DataWorker(QtCore.QObject):
                     # Send sample to plot
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                     # Since we're working with an entire set of samples, we need the corresponding x values
-                    samples_time = numpy.linspace(x/self.fs, (x+self.samples)/self.fs, num=self.samples)
+                    samples_time = numpy.linspace(x/self.fs, (x+self.samples-1)/self.fs, num=self.samples)
 
-                    for i, channel in enumerate(active_channels):
-                        if decimate_enabled:
-                            if zf[channel] is None:
-                                zf[channel] = signal.lfiltic(b=alias_filter, a=1, y=samples[i], x=samples[i])
-                                if sample_counter % decimate_factor < self.samples:
-                                    self.data_connectors[channel].cb_append_data_array(samples[i][sample_counter % decimate_factor::decimate_factor], samples_time[sample_counter % decimate_factor::decimate_factor])
-                            else: 
-                                samples_decimated, zf[channel] = signal.lfilter(b=alias_filter, a=1, x=samples[i], zi=zf[channel])
-
-                                self.data_connectors[channel].cb_append_data_array(samples_decimated[sample_counter % decimate_factor::decimate_factor], samples_time[sample_counter % decimate_factor::decimate_factor])
-                        else:
-                                self.data_connectors[channel].cb_append_data_array(samples[i], samples_time)
+                    self.newDataReceived.emit(active_channels, samples, samples_time)
 
                     if welch_enabled:
                         # Update FFT worker's data storage

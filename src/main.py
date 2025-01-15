@@ -8,23 +8,14 @@ pyqtgraph.setConfigOption('useOpenGL', True)
 pyqtgraph.setConfigOption('enableExperimental', True)
 pyqtgraph.setConfigOption('antialias', False)
 
-# pyqtgraph.setConfigOption('useNumba', True)
-
-# try:
-#     import cupy
-#     pyqtgraph.setConfigOptions(useCupy=true)
-# except:
-#     pass
-from pglive.sources.data_connector import DataConnector
-from pglive.sources.live_plot import LiveLinePlot
-from pglive.sources.live_plot_widget import LivePlotWidget
-from pglive.sources.live_axis_range import LiveAxisRange
-from pglive.sources.live_axis import LiveAxis
+from pyqtgraph import PlotDataItem, PlotWidget, AxisItem
 
 from data_parser import DataWorker
 from fft_parser import FFTWorker
-from custom_live_plot import CustomLivePlotWidget
 import global_vars
+from dvg_ringbuffer import RingBuffer
+import numpy
+from time import perf_counter_ns
 
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
     global_vars.DEBUG = True
@@ -463,69 +454,66 @@ class GraphWindow(QtWidgets.QWidget):
         self.graph_layout = QtWidgets.QVBoxLayout()
         self.initializePlotWidgets()
         if not self.settings['fft']['welch_enabled']:
-            self.fft_plot.hide()
+            self.fft_plot_widget.hide()
         self.setLayout(self.graph_layout)
-        self.data_connectors = []
         self.plots = []
         self.initializeWorker()
 
     def toggleFFT(self, checked):
         if(checked == QtCore.Qt.CheckState.Checked):
-            self.fft_plot.show()
+            self.fft_plot_widget.show()
         else:
-            self.fft_plot.hide()
+            self.fft_plot_widget.hide()
 
     # Initializes the plot widgets, alongside their axis configuration
     def initializePlotWidgets(self):
         fs = self.settings['biosemi']['fs']
-        self.plot_widget = CustomLivePlotWidget(title="EEG time-domain plot", skipFiniteCheck=True, autoDownsample=True, downsampleMethod='subsample')
-        self.plot_widget.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
+        self.plot_widget = PlotWidget(title="EEG time-domain plot", skipFiniteCheck=True, autoDownsample=True, downsampleMethod='subsample')
         self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
         self.plot_widget.setLabel('bottom', "Time", "s")
         self.plot_widget.setLabel('left', "Magnitude", "uV")
         self.graph_layout.addWidget(self.plot_widget)
 
-        fft_plot_bottom_axis = LiveAxis("bottom", tick_angle=45)
-        fft_plot_left_axis = LiveAxis("left")
-        self.fft_plot = CustomLivePlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
-        self.fft_plot.setLogMode(True, False)
-        self.fft_plot.getAxis('bottom').enableAutoSIPrefix(False)
-        self.fft_plot.getAxis('left').enableAutoSIPrefix(False)
-        self.fft_plot.setLabel('bottom', "Frequency", "Hz")
-        self.fft_plot.setLabel('left', "Power", "dB")
-        self.fft_plot.getAxis('bottom').setStyle(tickTextWidth=1)
-        self.fft_plot.add_crosshair(crosshair_pen=pyqtgraph.mkPen(color="red", width=1), crosshair_text_kwargs={"color": "white"})
-        self.graph_layout.addWidget(self.fft_plot)
+        fft_plot_bottom_axis = AxisItem("bottom")
+        fft_plot_left_axis = AxisItem("left")
+        self.fft_plot_widget = PlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
+        self.fft_plot_widget.setLogMode(True, False)
+        self.fft_plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
+        self.fft_plot_widget.getAxis('left').enableAutoSIPrefix(False)
+        self.fft_plot_widget.setLabel('bottom', "Frequency", "Hz")
+        self.fft_plot_widget.setLabel('left', "Power", "dB")
+        self.fft_plot_widget.getAxis('bottom').setStyle(tickTextWidth=1)
+        self.graph_layout.addWidget(self.fft_plot_widget)
 
     # Initializes graphs so I don't have to constantly repeat myself
     def initializeGraphs(self):
         total_channels = self.electrodes_model.rowCount()
-        fs = self.settings['biosemi']['fs']
+        self.fs = self.settings['biosemi']['fs']
+        self.samples = self.settings['biosemi']['samples']
         self.plots.clear()
-        self.data_connectors.clear()
+        self._last_update = 0
+        self._last_fft_update = 0
+        self.time_buffer = RingBuffer(capacity=self.fs*2, dtype='float64')
+        self.time_buffer.extend(numpy.zeros(self.fs*2))
         # Generate plots for time-domain graphing
+        self.buffers = []
         for i in range(total_channels):
             color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
-            plot = LiveLinePlot(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs', autoDownsample=True, downsampleMethod='subsample')
-            data_connector = DataConnector(plot, max_points=(fs*2)/self.settings['filter']['decimating_factor'], plot_rate=5, ignore_auto_range=True)
-            data_connector.pause()
-            self.data_connectors.append(data_connector)
+            plot = PlotDataItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs', autoDownsample=True, downsampleMethod='subsample')
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
             plot.hide()
+            buffer = RingBuffer(capacity=self.fs*2, dtype='float64')
+            buffer.extend(numpy.zeros(self.fs*2))
+            self.buffers.append(buffer)
         # Generate plot for FFT graphing
-        plot = LiveLinePlot(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='pairs')
-        data_connector = DataConnector(plot, plot_rate=30)
-        self.fft_data_connector = data_connector
-        self.plots.append(plot)
-        self.fft_plot.addItem(plot)
-        return
+        self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='pairs')
+        self.fft_plot_widget.addItem(self.fft_plot)
 
     def startCapture(self):
         if not self.is_capturing:
             self.initializeGraphs()
-            self.fft_worker.setDataConnector(self.fft_data_connector)
             self.captureStarted.emit()
             self.is_capturing = True
         else:
@@ -546,19 +534,16 @@ class GraphWindow(QtWidgets.QWidget):
     def cleanup(self):
         print("Cleaning up")
         self.is_capturing = False
-        for connector in self.data_connectors:
-            connector.deleteLater()
         for plot in self.plots:
             plot.deleteLater()
         self.disableThresholds()
         self.plot_widget.deleteLater()
-        self.fft_plot.deleteLater()
+        self.fft_plot_widget.deleteLater()
         self.initializePlotWidgets()
         if not self.settings['fft']['welch_enabled']:
-            self.fft_plot.hide()
+            self.fft_plot_widget.hide()
         if self.restart_queued:
             self.initializeGraphs()
-            self.fft_worker.setDataConnector(self.fft_data_connector)
             self.captureStarted.emit()
             self.is_capturing = True
             self.restart_queued = False
@@ -581,12 +566,13 @@ class GraphWindow(QtWidgets.QWidget):
             self.debug_worker.finishedRead.connect(self.stopCapture)
             self.debug_thread.start()
         self.data_thread = QtCore.QThread()
-        self.worker = DataWorker(self.settings, self.electrodes_model, self.freq_bands_model, self.plots, self.data_connectors)
+        self.worker = DataWorker(self.settings, self.electrodes_model, self.freq_bands_model, self.plots)
         self.worker.moveToThread(self.data_thread)
         self.worker.finished.connect(self.data_thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
         self.data_thread.finished.connect(self.data_thread.deleteLater)
         self.worker.finishedCapture.connect(self.cleanup)
+        self.worker.newDataReceived.connect(self.updatePlots)
 
         self.fft_thread = QtCore.QThread()
         self.fft_worker = FFTWorker(self.settings, self.electrodes_model, self.freq_bands_model)
@@ -597,8 +583,27 @@ class GraphWindow(QtWidgets.QWidget):
         self.worker.welchBufferChanged.connect(self.fft_worker.updateBuffers)
         self.worker.triggerFFT.connect(self.fft_worker.plotFFT)
         self.worker.finished.connect(self.fft_worker.terminate)
+        self.fft_worker.newDataReceived.connect(self.updateFFTPlot)
         self.data_thread.start()
         self.fft_thread.start()
+
+    # Time value should probably just depend on whatever is in the array
+    def updatePlots(self, channels, data, time_range):
+        self.update_rate = 15
+        self.time_buffer.extend(time_range)
+        for i, channel in enumerate(channels):
+            self.buffers[i].extend(data[i])
+        if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
+            return
+        for i, channel in enumerate(channels):
+            self.plots[channel].setData(y=self.buffers[i], x=self.time_buffer)
+        self._last_update = perf_counter_ns()
+        
+    def updateFFTPlot(self, f, pxx):
+        if perf_counter_ns() < self._last_fft_update + ((10**9)/self.update_rate):
+            return
+        self.fft_plot.setData(y=pxx, x=f)
+        self._last_fft_update = perf_counter_ns()
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):

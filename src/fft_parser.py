@@ -11,6 +11,7 @@ import global_vars
 
 class FFTWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
+    newDataReceived = QtCore.pyqtSignal(numpy.ndarray, numpy.ndarray)
 
     def __init__(self, settings, electrodes_model, freq_bands_model):
         super().__init__()
@@ -31,9 +32,6 @@ class FFTWorker(QtCore.QObject):
             buf = RingBuffer(capacity=self.welch_window)
             buf.extend(numpy.zeros(self.welch_window))
             self.welch_buffers.append(buf)
-
-    def setDataConnector(self, connector):
-        self.data_connector = connector
 
     def initializeWorker(self):
         self.welch_window = self.settings['fft']['welch_window']
@@ -57,7 +55,7 @@ class FFTWorker(QtCore.QObject):
         f, pxx = signal.welch(x=avg_buffer, fs=self.fs, nperseg=self.welch_window//5)
         pxx[pxx == 0] = 0.0000000001
         log_pxx = 10*numpy.log10(pxx*1000)
-        self.data_connector.cb_set_data(log_pxx, f)
+        self.newDataReceived.emit(f, log_pxx)
         for band, [lower, upper] in global_vars.FREQ_BANDS.items():
             freq_filter = (f >= lower) & (f <= upper)
             band_values = pxx[freq_filter]
