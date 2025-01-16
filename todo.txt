@@ -1,22 +1,14 @@
-- Welch spectrum update rate makes entire system lag
-    - This is mostly a limitation of the library, but some optimization was achieved by using numpy arrays as much as possible
 - Potentially allow changing which data we're reading in real time. (maybe)
 - Change aggregator classes (settings, model?) to have accessors so we no longer use direct references
 - Maybe add a debug tab where I can more quickly configure certain values, only shows up with the -d flag on
     - I added a debug thread, so this should be much easier to implement via slots
-- Read tACS manual to determine how to configure and send a signal
-    - Equipment must be switched on before connecting, as undefined currents are output upon switch on
-    - TTL levels
-        - Low: 0-0.4V
-        - High: 2.4-5.25V
-        - Minimum current: 3mA
-    - Level-triggered (not edge)
-    - Active high (high-level triggers stimulation)
-    - Minimum length of trigger: 1ms
 - Potentially use CUDA to speed everything up
     - Testing showed it to actually be slower, surprisingly
 - Add controller thread to finally solve all the annoying issues trying to start/stop the workers
     - I tried to not do this and wound up paying the price because I _need_ the debug thread to open its socket before the data capture starts
-    - Decided this isn't worth fixing because actual users won't be using the debug mode
-
+    - Decided this isn't worth fixing because actual users won't be using the debug mode, but it is slowly driving me insane
 - Take a second look at decimation, I think it should be more performant now that we do it to entire groups of samples
+    - Not clear whether pyqtgraph already considers whether the data can be displayed when painting, need to implement some logic to
+      reduce the data based on how much actually fits in a pixel
+- Usually EEG displays show all the waves in separate rows, consider adding a display like that as an option, in exchange for not displaying the correct uV
+    - Maybe redundant? The Biosemi software that needs to be open also already does that job

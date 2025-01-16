@@ -90,7 +90,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
         self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
         if global_vars.DEBUG:
-            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignal)
+            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignalFromFile)
         self.graph_window.captureStarted.connect(self.graph_window.worker.readData)
         self.graph_window.captureStarted.connect(self.graph_window.fft_worker.initializeWorker)
 
@@ -477,7 +477,8 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
         self.plot_widget.setLabel('bottom', "Time", "s")
         self.plot_widget.setLabel('left', "Magnitude", "uV")
-        self.plot_widget.setXRange(0,self.buffer_size/fs)
+        padding = 0.05
+        self.plot_widget.setXRange(0-padding,self.buffer_size/fs + padding)
         self.graph_layout.addWidget(self.plot_widget)
 
         fft_plot_bottom_axis = AxisItem("bottom")
@@ -595,9 +596,9 @@ class GraphWindow(QtWidgets.QWidget):
 
     # Update every plot at once
     def updatePlots(self, channels, data, time_range):
-        self.update_rate = 15
+        self.update_rate = 30
         # This should depend on the viewbox dimensions
-        downscale_factor = 2
+        downscale_factor = 1
         self.time_buffer.extend(time_range)
         self._received += 1
         for i, channel in enumerate(channels):
