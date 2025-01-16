@@ -7,6 +7,7 @@ import pyqtgraph
 pyqtgraph.setConfigOption('useOpenGL', True)
 pyqtgraph.setConfigOption('enableExperimental', True)
 pyqtgraph.setConfigOption('antialias', False)
+pyqtgraph.setConfigOption('exitCleanup', True)
 
 from pyqtgraph import PlotDataItem, PlotWidget, AxisItem
 
@@ -20,6 +21,7 @@ from time import perf_counter_ns
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
     global_vars.DEBUG = True
     from debug_source import DebugWorker
+    pyqtgraph.setConfigOption('crashWarning', True)
 
 from serial import SerialHandler
 
@@ -420,7 +422,7 @@ class SelectionWindow(QtWidgets.QTabWidget):
             self.band_indicators[index.row()][0].setText(band + " under threshold")
             self.band_indicators[index.row()][1].setPixmap(self.black_icon)
 
-        ## Temporary placement, this might need its own thread
+        ## Temporary placement, this might need its own class
         if band == "Alpha":
             if status:
                 self.sendEnableSignal()
@@ -468,11 +470,14 @@ class GraphWindow(QtWidgets.QWidget):
     # Initializes the plot widgets, alongside their axis configuration
     def initializePlotWidgets(self):
         fs = self.settings['biosemi']['fs']
-        self.plot_widget = PlotWidget(title="EEG time-domain plot", skipFiniteCheck=True, autoDownsample=True, downsampleMethod='subsample')
+        # This should probably be exposed in the UI, for now it's just a variable for convenience
+        self.buffer_size = fs*2
+        self.plot_widget = PlotWidget(title="EEG time-domain plot", skipFiniteCheck=True)
         self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
         self.plot_widget.setLabel('bottom', "Time", "s")
         self.plot_widget.setLabel('left', "Magnitude", "uV")
+        self.plot_widget.setXRange(0,self.buffer_size/fs)
         self.graph_layout.addWidget(self.plot_widget)
 
         fft_plot_bottom_axis = AxisItem("bottom")
@@ -494,16 +499,19 @@ class GraphWindow(QtWidgets.QWidget):
         self.plots.clear()
         self._last_update = 0
         self._last_fft_update = 0
-        self.time_buffer = RingBuffer(capacity=self.fs*2, dtype='float64')
+        self._received = 0
+        self.time_buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
         # Generate plots for time-domain graphing
         self.buffers = []
         for i in range(total_channels):
             color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
-            plot = PlotDataItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs', autoDownsample=True, downsampleMethod='subsample')
+            plot = PlotDataItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs')
+            plot.setDownsampling(auto=True, method='peak')
+            plot.setSkipFiniteCheck(True)
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
             plot.hide()
-            buffer = RingBuffer(capacity=self.fs*2, dtype='float64')
+            buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
             self.buffers.append(buffer)
         # Generate plot for FFT graphing
         self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='pairs')
@@ -585,20 +593,24 @@ class GraphWindow(QtWidgets.QWidget):
         self.data_thread.start()
         self.fft_thread.start()
 
-    # Time value should probably just depend on whatever is in the array
+    # Update every plot at once
     def updatePlots(self, channels, data, time_range):
-        self.update_rate = 30
+        self.update_rate = 15
+        # This should depend on the viewbox dimensions
+        downscale_factor = 2
         self.time_buffer.extend(time_range)
-        if self.time_buffer.is_full:
-            self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + (time_range[1] - time_range[0])))
+        self._received += 1
         for i, channel in enumerate(channels):
             self.buffers[i].extend(data[i])
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
-        for i, channel in enumerate(channels):
-            self.plots[channel].setData(y=self.buffers[i], x=self.time_buffer)
         self._last_update = perf_counter_ns()
-        
+        for i, channel in enumerate(channels):
+            self.plots[channel].setData(y=self.buffers[i][::downscale_factor], x=self.time_buffer[::downscale_factor])
+        if self.time_buffer.is_full:
+            self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + (time_range[1] - time_range[0]))*self._received)
+        self._received = 0
+
     def updateFFTPlot(self, f, pxx):
         if perf_counter_ns() < self._last_fft_update + ((10**9)/self.update_rate):
             return
