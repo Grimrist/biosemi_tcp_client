@@ -71,7 +71,7 @@ class DebugWorker(QtCore.QObject):
         self.openSocket(self.port)
         self.terminated = False
         total_channels = self.electrodes_model.rowCount()
-        f = pyedflib.EdfReader("../files/S001/S001R11.edf")
+        f = pyedflib.EdfReader(self.settings['file']['current_file'])
         n = f.signals_in_file
         signal_labels = f.getSignalLabels()
         sigbufs = numpy.zeros((n, f.getNSamples()[0]), dtype=numpy.int16)

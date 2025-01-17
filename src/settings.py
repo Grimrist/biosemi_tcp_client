@@ -10,17 +10,12 @@ class SettingsHandler():
         self.file_name = file_name
         self.settings = settings
         try:
+            # Since settings are a dictionary, we update across all "categories" of our settings
             with open(self.file_name, 'r') as file:
-                # Since settings are a dictionary, we update across all "categories" of our settings
                 temp_settings = json.load(file)
                 self.settings.update(temp_settings)
-                # for k in self.settings.keys():
-                #     self.settings[k].update(temp_settings[k])
-        except FileNotFoundError:
-            # Can't read file, so we use defaults
-            pass
-        except ValueError:
-            # Settings file is broken, so we ignore it
+        # Can't read file, so we use defaults
+        except (FileNotFoundError, ValueError):
             pass
         # Define our default settings, and then overwrite them with whatever is saved in settings
         # This should prevent a broken settings file from breaking the whole program
@@ -48,6 +43,9 @@ class SettingsHandler():
         self.settings['serial'].setdefault("enabled", True)
         self.settings['serial'].setdefault("port", "ttyUSB0")
         self.settings['serial'].setdefault("baud_rate", '115200')
+        self.settings.setdefault("file", {})
+        self.settings['file'].setdefault('selected_file', None)
+        self.settings['file'].setdefault('directory', None)
 
     def saveSettings(self):
         try:
@@ -120,3 +118,9 @@ class SettingsHandler():
 
     def setBaudRate(self, baud):
         self.settings['serial']['baud_rate'] = str(baud)
+
+    def setFile(self, file):
+        self.settings['file']['current_file'] = str(file)
+
+    def setDirectory(self, directory):
+        self.settings['file']['directory'] = str(directory)

@@ -11,4 +11,5 @@
     - Not clear whether pyqtgraph already considers whether the data can be displayed when painting, need to implement some logic to
       reduce the data based on how much actually fits in a pixel
 - Usually EEG displays show all the waves in separate rows, consider adding a display like that as an option, in exchange for not displaying the correct uV
-    - Maybe redundant? The Biosemi software that needs to be open also already does that job
+    - Maybe redundant? The Biosemi software that needs to be open already does that job
+- Separate file reading functionality from DebugWorker to provide the functionality to regular users

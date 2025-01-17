@@ -24,7 +24,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "-d":
     pyqtgraph.setConfigOption('crashWarning', True)
 
 from serial import SerialHandler
-
+from file_tab import FileTab
 # MainWindow holds all other windows, initializes the settings,
 # and connects every needed signal to its respective slot.
 class MainWindow(QtWidgets.QMainWindow):
@@ -118,6 +118,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.alpha_threshold_box.editingFinished.connect(self.updateAlphaThreshold)
 
         self.freq_bands_model.thresholdChanged.connect(self.selection_window.updateThresholdDisplay)
+
+        # File view settings
+        self.selection_window.file_tab.activeFileChanged.connect(self.settings_handler.setFile)
+        self.selection_window.file_tab.directoryChanged.connect(self.settings_handler.setDirectory)
+        self.selection_window.file_tab.doubleClickedFile.connect(self.graph_window.startCapture)
+
+        # Consider making double click start the debug capture immediately?
+        # self.file_view.doubleClicked.connect()
         ###
 
         # Show window
@@ -205,6 +213,7 @@ class SelectionWindow(QtWidgets.QTabWidget):
         self.timer.setSingleShot(True)
         self.timer.setInterval(1000)
         # Two tabs: one for settings, the other for value monitoring
+        # New tab: file selection, useful for debugging and also calibrating thresholds
         ## Settings tab
         settings_window = QtWidgets.QWidget()
         selection_layout = QtWidgets.QVBoxLayout()
@@ -372,6 +381,9 @@ class SelectionWindow(QtWidgets.QTabWidget):
 
         settings_window.setLayout(selection_layout)
         self.addTab(settings_window, "Settings")
+
+        self.file_tab = FileTab(settings)
+        self.addTab(self.file_tab, "File")
 
         ## Measurements tab
         measurements_window = QtWidgets.QWidget()
