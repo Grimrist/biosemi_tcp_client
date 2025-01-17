@@ -41,7 +41,6 @@ class FileTab(QtWidgets.QWidget):
     def notifyFileChange(self, index):
         file = self.file_system.filePath(index)
         self.activeFileChanged.emit(file)
-        print(file)
         
     def startFileDisplay(self, index):
         self.notifyFileChange(index)

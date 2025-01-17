@@ -194,6 +194,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def closeEvent(self, event):
         self.settings_handler.saveSettings()
         self.graph_window.stopCapture()
+        self.graph_window.data_thread.wait(100)
+        self.graph_window.fft_thread.wait(100)
+        if global_vars.DEBUG:
+            self.graph_window.debug_thread.wait(100)
+        self.graph_window.fft_plot_widget.close()
+        self.graph_window.plot_widget.close()
         event.accept()        
 
 # SelectionWindow implements all the configuration UI,
@@ -489,8 +495,6 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
         self.plot_widget.setLabel('bottom', "Time", "s")
         self.plot_widget.setLabel('left', "Magnitude", "uV")
-        padding = 0.05
-        self.plot_widget.setXRange(0-padding,self.buffer_size/fs + padding)
         self.graph_layout.addWidget(self.plot_widget)
 
         fft_plot_bottom_axis = AxisItem("bottom")
@@ -529,6 +533,8 @@ class GraphWindow(QtWidgets.QWidget):
         # Generate plot for FFT graphing
         self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='pairs')
         self.fft_plot_widget.addItem(self.fft_plot)
+        padding = 0.05
+        self.plot_widget.setXRange(0-padding,self.buffer_size/self.fs + padding)
 
     def startCapture(self):
         if not self.is_capturing:
@@ -554,13 +560,11 @@ class GraphWindow(QtWidgets.QWidget):
         print("Cleaning up")
         self.is_capturing = False
         for plot in self.plots:
+            self.plot_widget.removeItem(plot)
             plot.deleteLater()
+        self.fft_plot_widget.removeItem(self.fft_plot)
+        self.fft_plot.deleteLater()
         self.disableThresholds()
-        self.plot_widget.deleteLater()
-        self.fft_plot_widget.deleteLater()
-        self.initializePlotWidgets()
-        if not self.settings['fft']['welch_enabled']:
-            self.fft_plot_widget.hide()
         if self.restart_queued:
             self.initializeGraphs()
             self.captureStarted.emit()
@@ -618,8 +622,9 @@ class GraphWindow(QtWidgets.QWidget):
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
         self._last_update = perf_counter_ns()
+        offset_factor = 8
         for i, channel in enumerate(channels):
-            self.plots[channel].setData(y=self.buffers[i][::downscale_factor], x=self.time_buffer[::downscale_factor])
+            self.plots[channel].setData(y=self.buffers[i][::downscale_factor] - offset_factor*i, x=self.time_buffer[::downscale_factor])
         if self.time_buffer.is_full:
             self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + (time_range[1] - time_range[0]))*self._received)
         self._received = 0
