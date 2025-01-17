@@ -44,7 +44,7 @@ class SettingsHandler():
         self.settings['serial'].setdefault("port", "ttyUSB0")
         self.settings['serial'].setdefault("baud_rate", '115200')
         self.settings.setdefault("file", {})
-        self.settings['file'].setdefault('selected_file', None)
+        self.settings['file'].setdefault('current_file', None)
         self.settings['file'].setdefault('directory', None)
 
     def saveSettings(self):
