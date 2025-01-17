@@ -9,7 +9,8 @@ pyqtgraph.setConfigOption('enableExperimental', True)
 pyqtgraph.setConfigOption('antialias', False)
 pyqtgraph.setConfigOption('exitCleanup', True)
 
-from pyqtgraph import PlotDataItem, PlotWidget, AxisItem
+from pyqtgraph import PlotDataItem, PlotWidget, AxisItem, GridItem
+from pyqtgraph.dockarea import Dock, DockArea
 
 from data_parser import DataWorker
 from fft_parser import FFTWorker
@@ -489,13 +490,20 @@ class GraphWindow(QtWidgets.QWidget):
     def initializePlotWidgets(self):
         fs = self.settings['biosemi']['fs']
         # This should probably be exposed in the UI, for now it's just a variable for convenience
+        dock_area = DockArea()
+        dock_1 = Dock("Dock 1")
+        dock_2 = Dock("Dock 2")
+        dock_area.addDock(dock_1, 'top')
+        dock_area.addDock(dock_2, 'bottom')
         self.buffer_size = fs*2
         self.plot_widget = PlotWidget(title="EEG time-domain plot", skipFiniteCheck=True)
         self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
         self.plot_widget.setLabel('bottom', "Time", "s")
         self.plot_widget.setLabel('left', "Magnitude", "uV")
-        self.graph_layout.addWidget(self.plot_widget)
+        grid = GridItem()
+        self.plot_widget.addItem(grid)
+        dock_1.addWidget(self.plot_widget)
 
         fft_plot_bottom_axis = AxisItem("bottom")
         fft_plot_left_axis = AxisItem("left")
@@ -506,7 +514,9 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_plot_widget.setLabel('bottom', "Frequency", "Hz")
         self.fft_plot_widget.setLabel('left', "Power", "dB")
         self.fft_plot_widget.getAxis('bottom').setStyle(tickTextWidth=1)
-        self.graph_layout.addWidget(self.fft_plot_widget)
+        dock_2.addWidget(self.fft_plot_widget)
+
+        self.graph_layout.addWidget(dock_area)
 
     # Initializes graphs so I don't have to constantly repeat myself
     def initializeGraphs(self):
@@ -622,7 +632,7 @@ class GraphWindow(QtWidgets.QWidget):
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
         self._last_update = perf_counter_ns()
-        offset_factor = 8
+        offset_factor = 4
         for i, channel in enumerate(channels):
             self.plots[channel].setData(y=self.buffers[i][::downscale_factor] - offset_factor*i, x=self.time_buffer[::downscale_factor])
         if self.time_buffer.is_full:
