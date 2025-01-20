@@ -44,7 +44,7 @@ class DebugWorker(QtCore.QObject):
             for j, i in enumerate(lspace):
                 for _ in range(total_channels):
                     noise = numpy.random.normal(scale=numpy.sqrt(noise_power), size=lspace.shape)
-                    if t < 20: val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*10000 + noise[j]) 
+                    if t < 20: val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*100000 + noise[j]) 
                     else: val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*10 + noise[j]) 
                     val = (val_orig).to_bytes(3, byteorder='little', signed=True)
                     if(len(val) > 3):

@@ -92,7 +92,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
         self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
         if global_vars.DEBUG:
-            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignalFromFile)
+            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignal)
         self.graph_window.captureStarted.connect(self.graph_window.worker.readData)
         self.graph_window.captureStarted.connect(self.graph_window.fft_worker.initializeWorker)
 
@@ -501,6 +501,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
         self.plot_widget.setLabel('bottom', "Time", "s")
         self.plot_widget.setLabel('left', "Magnitude", "uV")
+        self.plot_widget.getViewBox().disableAutoRange()
         grid = GridItem()
         self.plot_widget.addItem(grid)
         dock_1.addWidget(self.plot_widget)
@@ -534,7 +535,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.buffers = []
         for i in range(total_channels):
             color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
-            plot = PlotDataItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='all')
+            plot = PlotDataItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs')
             plot.setDownsampling(auto=True, method='peak')
             plot.setSkipFiniteCheck(True)
             self.plots.append(plot)
@@ -543,9 +544,9 @@ class GraphWindow(QtWidgets.QWidget):
             buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
             self.buffers.append(buffer)
         # Generate plot for FFT graphing
-        self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='all')
+        self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='pairs')
         self.fft_plot_widget.addItem(self.fft_plot)
-        padding = 0.05
+        padding = 0
         self.plot_widget.setXRange(0-padding,self.buffer_size/self.fs + padding)
 
     def startCapture(self):
@@ -624,11 +625,18 @@ class GraphWindow(QtWidgets.QWidget):
 
     # Update every plot at once
     def updatePlots(self, channels, data, time_range):
-        self.update_rate = 30
+        self.update_rate = 5
+        # Scrolling faster than our update rate makes the graphing feel smoother
+        self.scroll_rate = 30
         self.time_buffer.extend(time_range)
         self._received += 1
         for i, channel in enumerate(channels):
             self.buffers[channel].extend(data[i])
+        if perf_counter_ns() > self._last_update + ((10**9)/self.scroll_rate):
+            if self.time_buffer.is_full:
+                time_unit = time_range[1] - time_range[0]
+                self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + time_unit)*self._received)
+            self._received = 0
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
         self._last_update = perf_counter_ns()
@@ -637,19 +645,21 @@ class GraphWindow(QtWidgets.QWidget):
         [[xmin, xmax], [ymin, ymax]] = self.plot_widget.getViewBox().viewRange()
         block_size = int(numpy.ceil(w / time_unit))
         num_bin = int(numpy.ceil((len(self.time_buffer) // block_size)/2.) * 2)
+        if num_bin < 3:
+            num_bin = 3
         offset_factor = 4
         for i, channel in enumerate(channels):
             buffer = numpy.array(self.buffers[channel]) - offset_factor*i
+            if not ((buffer >= ymin) & (buffer <= ymax)).any():
+                continue
             time = numpy.array(self.time_buffer)
             view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
-            clip_mask = (buffer[view] >= ymin) & (buffer[view] <= ymax)
-            self.plots[channel].setData(y=(buffer[view])[clip_mask], x=(time[view])[clip_mask])
-        if self.time_buffer.is_full:
-            self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + time_unit)*self._received)
-        self._received = 0
+            clip = numpy.clip(buffer[view], a_min=ymin, a_max=ymax)
+            self.plots[channel].setData(y=clip, x=time[view])
 
     def updateFFTPlot(self, f, pxx):
-        if perf_counter_ns() < self._last_fft_update + ((10**9)/self.update_rate):
+        self.fft_rate = 30
+        if perf_counter_ns() < self._last_fft_update + ((10**9)/self.fft_rate):
             return
         self.fft_plot.setData(y=pxx, x=f)
         self._last_fft_update = perf_counter_ns()
