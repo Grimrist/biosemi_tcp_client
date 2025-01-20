@@ -18,6 +18,7 @@ import global_vars
 from dvg_ringbuffer import RingBuffer
 import numpy
 from time import perf_counter_ns
+import tsdownsample
 
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
     global_vars.DEBUG = True
@@ -495,7 +496,6 @@ class GraphWindow(QtWidgets.QWidget):
         dock_2 = Dock("Dock 2")
         dock_area.addDock(dock_1, 'top')
         dock_area.addDock(dock_2, 'bottom')
-        self.buffer_size = fs*2
         self.plot_widget = PlotWidget(title="EEG time-domain plot", skipFiniteCheck=True)
         self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
@@ -520,6 +520,8 @@ class GraphWindow(QtWidgets.QWidget):
 
     # Initializes graphs so I don't have to constantly repeat myself
     def initializeGraphs(self):
+        fs = self.settings['biosemi']['fs']
+        self.buffer_size = int(fs*1.5)
         total_channels = self.electrodes_model.rowCount()
         self.fs = self.settings['biosemi']['fs']
         self.samples = self.settings['biosemi']['samples']
@@ -532,7 +534,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.buffers = []
         for i in range(total_channels):
             color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
-            plot = PlotDataItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs')
+            plot = PlotDataItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='all')
             plot.setDownsampling(auto=True, method='peak')
             plot.setSkipFiniteCheck(True)
             self.plots.append(plot)
@@ -541,7 +543,7 @@ class GraphWindow(QtWidgets.QWidget):
             buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
             self.buffers.append(buffer)
         # Generate plot for FFT graphing
-        self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='pairs')
+        self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='all')
         self.fft_plot_widget.addItem(self.fft_plot)
         padding = 0.05
         self.plot_widget.setXRange(0-padding,self.buffer_size/self.fs + padding)
@@ -625,8 +627,8 @@ class GraphWindow(QtWidgets.QWidget):
         self.update_rate = 30
         self.time_buffer.extend(time_range)
         self._received += 1
-        for i, channel in enumerate(channels):
-            self.buffers[channel].extend(data[i])
+        for i in range(len(data)):
+            self.buffers[i].extend(data[i])
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
         self._last_update = perf_counter_ns()
@@ -634,13 +636,15 @@ class GraphWindow(QtWidgets.QWidget):
         (w,h) = self.plot_widget.getViewBox().viewPixelSize()
         [[xmin, xmax], [ymin, ymax]] = self.plot_widget.getViewBox().viewRange()
         block_size = int(numpy.ceil(w / time_unit))
-        downscale_factor = block_size
+        num_bin = int(numpy.ceil((len(self.time_buffer) // block_size)/2.) * 2)
+        print(num_bin)
         offset_factor = 4
         for i, channel in enumerate(channels):
             buffer = numpy.array(self.buffers[channel]) - offset_factor*i
             time = numpy.array(self.time_buffer)
-            clip_mask = (buffer >= ymin) & (buffer <= ymax)
-            self.plots[channel].setData(y=buffer[clip_mask], x=time[clip_mask])
+            view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
+            clip_mask = (buffer[view] >= ymin) & (buffer[view] <= ymax)
+            self.plots[channel].setData(y=(buffer[view])[clip_mask], x=(time[view])[clip_mask])
         if self.time_buffer.is_full:
             self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + time_unit)*self._received)
         self._received = 0
