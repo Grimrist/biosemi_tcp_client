@@ -623,20 +623,26 @@ class GraphWindow(QtWidgets.QWidget):
     # Update every plot at once
     def updatePlots(self, channels, data, time_range):
         self.update_rate = 30
-        # This should depend on the viewbox dimensions
-        downscale_factor = 1
         self.time_buffer.extend(time_range)
         self._received += 1
         for i, channel in enumerate(channels):
-            self.buffers[i].extend(data[i])
+            self.buffers[channel].extend(data[i])
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
         self._last_update = perf_counter_ns()
+        time_unit = time_range[1] - time_range[0]
+        (w,h) = self.plot_widget.getViewBox().viewPixelSize()
+        [[xmin, xmax], [ymin, ymax]] = self.plot_widget.getViewBox().viewRange()
+        block_size = int(numpy.ceil(w / time_unit))
+        downscale_factor = block_size
         offset_factor = 4
         for i, channel in enumerate(channels):
-            self.plots[channel].setData(y=self.buffers[i][::downscale_factor] - offset_factor*i, x=self.time_buffer[::downscale_factor])
+            buffer = numpy.array(self.buffers[channel]) - offset_factor*i
+            time = numpy.array(self.time_buffer)
+            clip_mask = (buffer >= ymin) & (buffer <= ymax)
+            self.plots[channel].setData(y=buffer[clip_mask], x=time[clip_mask])
         if self.time_buffer.is_full:
-            self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + (time_range[1] - time_range[0]))*self._received)
+            self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + time_unit)*self._received)
         self._received = 0
 
     def updateFFTPlot(self, f, pxx):
