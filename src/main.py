@@ -627,8 +627,8 @@ class GraphWindow(QtWidgets.QWidget):
         self.update_rate = 30
         self.time_buffer.extend(time_range)
         self._received += 1
-        for i in range(len(data)):
-            self.buffers[i].extend(data[i])
+        for i, channel in enumerate(channels):
+            self.buffers[channel].extend(data[i])
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
         self._last_update = perf_counter_ns()
@@ -637,7 +637,6 @@ class GraphWindow(QtWidgets.QWidget):
         [[xmin, xmax], [ymin, ymax]] = self.plot_widget.getViewBox().viewRange()
         block_size = int(numpy.ceil(w / time_unit))
         num_bin = int(numpy.ceil((len(self.time_buffer) // block_size)/2.) * 2)
-        print(num_bin)
         offset_factor = 4
         for i, channel in enumerate(channels):
             buffer = numpy.array(self.buffers[channel]) - offset_factor*i
