@@ -3,7 +3,7 @@ from settings import SettingsHandler
 import sys
 from PyQt6 import QtWidgets, QtCore, QtGui, QtSerialPort
 import pyqtgraph
-
+import OpenGL
 pyqtgraph.setConfigOption('useOpenGL', True)
 pyqtgraph.setConfigOption('enableExperimental', True)
 pyqtgraph.setConfigOption('antialias', False)
@@ -538,13 +538,14 @@ class GraphWindow(QtWidgets.QWidget):
             color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
             plot = PlotCurveItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs')
             plot.setSkipFiniteCheck(True)
+            plot.setSegmentedLineMode('on')
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
             plot.hide()
             buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
             self.buffers.append(buffer)
         # Generate plot for FFT graphing
-        self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='pairs')
+        self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), skipFiniteCheck=True, connect='pairs')
         self.fft_plot_widget.addItem(self.fft_plot)
         padding = 0
         self.plot_widget.setXRange(0,self.buffer_size/self.fs,padding)
@@ -650,16 +651,16 @@ class GraphWindow(QtWidgets.QWidget):
             num_bin = 3
         offset_factor = 4
         for i, channel in enumerate(channels):
-            buffer = numpy.array(self.buffers[channel]) - offset_factor*i
+            buffer = self.buffers[channel].__array__() - offset_factor*i
             if not ((buffer >= ymin) & (buffer <= ymax)).any():
                 continue
-            time = numpy.array(self.time_buffer)
+            time = self.time_buffer.__array__()
             view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
             clip = numpy.clip(buffer[view], a_min=ymin, a_max=ymax)
             self.plots[channel].setData(y=clip, x=time[view])
 
     def updateFFTPlot(self, f, pxx):
-        self.fft_rate = 30
+        self.fft_rate = 15
         if perf_counter_ns() < self._last_fft_update + ((10**9)/self.fft_rate):
             return
         self.fft_plot.setData(y=pxx, x=f)

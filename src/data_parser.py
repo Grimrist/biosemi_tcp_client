@@ -85,8 +85,8 @@ class DataWorker(QtCore.QObject):
 
         # We're seeking a 45 Hz update rate for the plots right now, so we calculate
         # how often we need to update in terms of samples received
-        update_rate = int(numpy.ceil(self.fs / 45 / self.samples))
-        print("Update rate in packet count (aiming for 45 Hz):", update_rate)
+        update_rate = int(numpy.ceil(self.fs / 20 / self.samples))
+        print("Update rate in packet count (aiming for 20 Hz):", update_rate)
 
         decimate_factor = self.settings['filter']['decimating_factor']
         if decimate_factor > 1: 
@@ -171,7 +171,6 @@ class DataWorker(QtCore.QObject):
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                     # Since we're working with an entire set of samples, we need the corresponding x values
                     samples_time = numpy.linspace(x/self.fs, (x+self.samples-1)/self.fs, num=self.samples)
-
                     self.newDataReceived.emit(active_channels, samples, samples_time)
 
                     if welch_enabled:
