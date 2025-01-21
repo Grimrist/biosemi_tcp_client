@@ -9,7 +9,7 @@ pyqtgraph.setConfigOption('enableExperimental', True)
 pyqtgraph.setConfigOption('antialias', False)
 pyqtgraph.setConfigOption('exitCleanup', True)
 
-from pyqtgraph import PlotDataItem, PlotWidget, AxisItem, GridItem
+from pyqtgraph import PlotCurveItem, PlotWidget, AxisItem, GridItem, PlotDataItem
 from pyqtgraph.dockarea import Dock, DockArea
 
 from data_parser import DataWorker
@@ -536,8 +536,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.buffers = []
         for i in range(total_channels):
             color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
-            plot = PlotDataItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs')
-            plot.setDownsampling(auto=True, method='peak')
+            plot = PlotCurveItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs')
             plot.setSkipFiniteCheck(True)
             self.plots.append(plot)
             self.plot_widget.addItem(plot)
