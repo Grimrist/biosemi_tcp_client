@@ -2,15 +2,11 @@ import socket   # used for TCP/IP communication
 from settings import SettingsHandler    
 import sys
 from PyQt6 import QtWidgets, QtCore, QtGui, QtSerialPort
-import pyqtgraph
-import OpenGL
-pyqtgraph.setConfigOption('useOpenGL', True)
-pyqtgraph.setConfigOption('enableExperimental', True)
-pyqtgraph.setConfigOption('antialias', False)
-pyqtgraph.setConfigOption('exitCleanup', True)
 
-from pyqtgraph import PlotCurveItem, PlotWidget, AxisItem, GridItem, PlotDataItem
-from pyqtgraph.dockarea import Dock, DockArea
+import vispy
+from vispy.scene import SceneCanvas, AxisWidget, Line
+from vispy.app import use_app
+from vispy.color import ColorArray
 
 from data_parser import DataWorker
 from fft_parser import FFTWorker
@@ -23,7 +19,6 @@ import tsdownsample
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
     global_vars.DEBUG = True
     from debug_source import DebugWorker
-    pyqtgraph.setConfigOption('crashWarning', True)
 
 from serial import SerialHandler
 from file_tab import FileTab
@@ -490,35 +485,36 @@ class GraphWindow(QtWidgets.QWidget):
     # Initializes the plot widgets, alongside their axis configuration
     def initializePlotWidgets(self):
         fs = self.settings['biosemi']['fs']
-        # This should probably be exposed in the UI, for now it's just a variable for convenience
-        dock_area = DockArea()
-        dock_1 = Dock("Dock 1")
-        dock_2 = Dock("Dock 2")
-        dock_area.addDock(dock_1, 'top')
-        dock_area.addDock(dock_2, 'bottom')
-        self.plot_widget = PlotWidget(title="EEG time-domain plot", skipFiniteCheck=True)
-        self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
-        self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
-        self.plot_widget.setLabel('bottom', "Time", "s")
-        self.plot_widget.setLabel('left', "Magnitude", "uV")
-        self.plot_widget.getViewBox().disableAutoRange()
-        grid = GridItem()
-        self.plot_widget.addItem(grid)
-        dock_1.addWidget(self.plot_widget)
+        self.plot_widget = SceneCanvas(title="EEG time-domain plot")
+        grid = self.plot_widget.central_widget.add_grid(spacing=0)
+        self.viewbox = grid.add_view(row=0, col=1, camera='panzoom')
+        # add some axes
+        x_axis = AxisWidget(orientation='bottom')
+        x_axis.stretch = (1, 0.1)
+        grid.add_widget(x_axis, row=1, col=1)
+        x_axis.link_view(self.viewbox)
+        y_axis = AxisWidget(orientation='left')
+        y_axis.stretch = (0.1, 1)
+        grid.add_widget(y_axis, row=0, col=0)
+        y_axis.link_view(self.viewbox)
+        self.graph_layout.addWidget(self.plot_widget.native)
 
-        fft_plot_bottom_axis = AxisItem("bottom")
-        fft_plot_left_axis = AxisItem("left")
-        self.fft_plot_widget = PlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
-        self.fft_plot_widget.setLogMode(True, False)
-        self.fft_plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
-        self.fft_plot_widget.getAxis('left').enableAutoSIPrefix(False)
-        self.fft_plot_widget.setLabel('bottom', "Frequency", "Hz")
-        self.fft_plot_widget.setLabel('left', "Power", "dB")
-        self.fft_plot_widget.getAxis('bottom').setStyle(tickTextWidth=1)
+        self.fft_plot_widget = SceneCanvas(title="Power spectral density graph")
+        grid = self.fft_plot_widget.central_widget.add_grid(spacing=0)
+        self.fft_viewbox = grid.add_view(row=0, col=1, camera='panzoom')
+        x_axis = AxisWidget(orientation='bottom')
+        x_axis.stretch = (1, 0.1)
+        grid.add_widget(x_axis, row=1, col=1)
+        x_axis.link_view(self.fft_viewbox)
+        y_axis = AxisWidget(orientation='left')
+        y_axis.stretch = (0.1, 1)
+        grid.add_widget(y_axis, row=0, col=0)
+        y_axis.link_view(self.fft_viewbox)
+        self.graph_layout.addWidget(self.fft_plot_widget.native)
     
-        dock_2.addWidget(self.fft_plot_widget)
+        # dock_2.addWidget(self.fft_plot_widget)
 
-        self.graph_layout.addWidget(dock_area)
+        # self.graph_layout.addWidget(dock_area)
 
     # Initializes graphs so I don't have to constantly repeat myself
     def initializeGraphs(self):
@@ -531,25 +527,30 @@ class GraphWindow(QtWidgets.QWidget):
         self._last_update = 0
         self._last_fft_update = 0
         self._received = 0
-        self.time_buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
+        self.time_buffer = RingBuffer(capacity=self.buffer_size, dtype='float32')
+        self.time_buffer.extend(numpy.zeros(self.buffer_size))
+
         # Generate plots for time-domain graphing
         self.buffers = []
+        connect = []
+        colors = []
         for i in range(total_channels):
-            color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
-            plot = PlotCurveItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs')
-            plot.setSkipFiniteCheck(True)
-            plot.setSegmentedLineMode('on')
-            self.plots.append(plot)
-            self.plot_widget.addItem(plot)
-            plot.hide()
-            buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
+            start = i * self.buffer_size
+            temp = numpy.empty((self.buffer_size - 1, 2), numpy.float32)
+            temp[:, 0] = numpy.arange(start=start,stop=start+self.buffer_size - 1)
+            temp[:, 1] = temp[:, 0] + 1
+            connect.extend(temp.tolist())
+        connect=numpy.array(connect)
+        print(connect.shape)
+        for i in range(total_channels):
+            color = ColorArray(color_space="hsv", color=(360*i/total_channels, 0.8, 0.9))
+            colors.extend([color]*self.buffer_size)
+            buffer = RingBuffer(capacity=self.buffer_size, dtype='float32')
+            buffer.extend(numpy.zeros(self.buffer_size))
             self.buffers.append(buffer)
+        self.plot = Line(parent=self.viewbox.scene, color=colors, method='gl', connect=connect)
         # Generate plot for FFT graphing
-        self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), skipFiniteCheck=True, connect='pairs')
-        self.fft_plot_widget.addItem(self.fft_plot)
-        padding = 0
-        self.plot_widget.setXRange(0,self.buffer_size/self.fs,padding)
-        self.fft_plot_widget.getViewBox().enableAutoRange(enable=False)
+        self.fft_plot = Line(parent=self.fft_viewbox.scene, method='gl')
 
     def startCapture(self):
         if not self.is_capturing:
@@ -575,10 +576,8 @@ class GraphWindow(QtWidgets.QWidget):
         print("Cleaning up")
         self.is_capturing = False
         for plot in self.plots:
-            self.plot_widget.removeItem(plot)
-            plot.deleteLater()
-        self.fft_plot_widget.removeItem(self.fft_plot)
-        self.fft_plot.deleteLater()
+            plot.parent = None
+        self.fft_plot.parent = None
         self.disableThresholds()
         if self.restart_queued:
             self.initializeGraphs()
@@ -626,44 +625,54 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_thread.start()
 
     # Update every plot at once
-    def updatePlots(self, channels, data, time_range):
-        self.update_rate = 5
+    def updatePlots(self, total_channels, data, time_range):
+        self.update_rate = 30
         # Scrolling faster than our update rate makes the graphing feel smoother
         self.scroll_rate = 30
         self.time_buffer.extend(time_range)
         self._received += 1
-        for i, channel in enumerate(channels):
-            self.buffers[channel].extend(data[i])
+        for i in range(total_channels):
+            self.buffers[i].extend(data[i])
         if perf_counter_ns() > self._last_update + ((10**9)/self.scroll_rate):
             if self.time_buffer.is_full:
                 time_unit = time_range[1] - time_range[0]
-                self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + time_unit)*self._received)
+                self.viewbox.camera.pan(((time_range[-1] - time_range[0] + time_unit)*self._received,0))
             self._received = 0
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
         self._last_update = perf_counter_ns()
-        time_unit = time_range[1] - time_range[0]
-        (w,h) = self.plot_widget.getViewBox().viewPixelSize()
-        [[xmin, xmax], [ymin, ymax]] = self.plot_widget.getViewBox().viewRange()
-        block_size = int(numpy.ceil(w / time_unit))
-        num_bin = int(numpy.ceil((len(self.time_buffer) // block_size)/2.) * 2)
-        if num_bin < 3:
-            num_bin = 3
-        offset_factor = 4
-        for i, channel in enumerate(channels):
-            buffer = self.buffers[channel].__array__() - offset_factor*i
-            if not ((buffer >= ymin) & (buffer <= ymax)).any():
-                continue
-            time = self.time_buffer.__array__()
-            view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
-            clip = numpy.clip(buffer[view], a_min=ymin, a_max=ymax)
-            self.plots[channel].setData(y=clip, x=time[view])
+        # time_unit = time_range[1] - time_range[0]
+        # (w,h) = self.plot_widget.getViewBox().viewPixelSize()
+        # [[xmin, xmax], [ymin, ymax]] = self.viewbox.get_scene_bounds()
+        # block_size = int(numpy.ceil(w / time_unit))
+        # num_bin = int(numpy.ceil((len(self.time_buffer) // block_size)/2.) * 2)
+        # if num_bin < 3:
+        #     num_bin = 3
+        offset_factor = 4000
+        # for i, channel in enumerate(channels):
+        #     buffer = self.buffers[channel].__array__() - offset_factor*i
+        #     # if not ((buffer >= ymin) & (buffer <= ymax)).any():
+        #     #     continue
+        #     time = self.time_buffer.__array__()
+        #     # view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
+        #     # clip = numpy.clip(buffer[view], a_min=ymin, a_max=ymax)
+        #     # data = numpy.vstack((clip, time[view]))  
+        #     # data = numpy.transpose(numpy.vstack((time, buffer)))
+
+
+        time = numpy.tile(numpy.array(self.time_buffer), total_channels).flatten()
+        data = []
+        for i in range(total_channels):
+            data.append(numpy.array(self.buffers[i]) - offset_factor*i)
+        data = numpy.array(data).flatten()
+        self.plot.set_data(pos=numpy.transpose(numpy.vstack((time,data))))
 
     def updateFFTPlot(self, f, pxx):
         self.fft_rate = 15
         if perf_counter_ns() < self._last_fft_update + ((10**9)/self.fft_rate):
             return
-        self.fft_plot.setData(y=pxx, x=f)
+        data = numpy.transpose(numpy.vstack((f, pxx)))
+        self.fft_plot.set_data(pos=data)
         self._last_fft_update = perf_counter_ns()
 
 class SingleSelectQListView(QtWidgets.QListView):
@@ -751,6 +760,7 @@ class FreqTableModel(TableModel):
         self.setData(idx, state)
         self.thresholdChanged.emit(idx, False)
 
-app = QtWidgets.QApplication(sys.argv)
+app = use_app("pyqt6")
+app.create()
 window = MainWindow()
-sys.exit(app.exec())
+sys.exit(app.run())

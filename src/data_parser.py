@@ -14,7 +14,7 @@ class DataWorker(QtCore.QObject):
     finishedCapture = QtCore.pyqtSignal()
     welchBufferChanged = QtCore.pyqtSignal(int, numpy.ndarray)
     triggerFFT = QtCore.pyqtSignal()
-    newDataReceived = QtCore.pyqtSignal(list, numpy.ndarray, numpy.ndarray)
+    newDataReceived = QtCore.pyqtSignal(int, numpy.ndarray, numpy.ndarray)
 
     def __init__(self, settings, electrodes_model, freq_bands_model, plots):
         super().__init__()
@@ -112,9 +112,6 @@ class DataWorker(QtCore.QObject):
             self.finished.emit()
             return
 
-        # Enable connectors that we will be using
-        for i in active_channels:
-            self.plots[i].show()
         attempt_counter = 0
         sample_counter = 0
         self.is_capturing = True
@@ -153,11 +150,11 @@ class DataWorker(QtCore.QObject):
 
                     # Copy bytes into new 4-byte array, change view to uint32, filter by only the channels we need and squeeze dimensions
                     padded_array[:,:,-3:] = deinterleave_data
-                    samples = padded_array.view('int32')[[active_channels], :].reshape(len(active_channels), self.samples)
+                    samples = padded_array.view('int32').reshape(total_channels, self.samples)
 
                     # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
                     if(active_reference > -1):
-                        ref_values = padded_array.view('int32')[active_reference, :].reshape(1, self.samples)
+                        ref_values = padded_array.view('int32').reshape(1, self.samples)
                     else:
                         ref_values = numpy.zeros(self.samples)
 
@@ -171,7 +168,7 @@ class DataWorker(QtCore.QObject):
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                     # Since we're working with an entire set of samples, we need the corresponding x values
                     samples_time = numpy.linspace(x/self.fs, (x+self.samples-1)/self.fs, num=self.samples)
-                    self.newDataReceived.emit(active_channels, samples, samples_time)
+                    self.newDataReceived.emit(total_channels, samples, samples_time)
 
                     if welch_enabled:
                         # Update FFT worker's data storage
