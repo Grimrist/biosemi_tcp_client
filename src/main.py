@@ -515,6 +515,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_plot_widget.setLabel('bottom', "Frequency", "Hz")
         self.fft_plot_widget.setLabel('left', "Power", "dB")
         self.fft_plot_widget.getAxis('bottom').setStyle(tickTextWidth=1)
+    
         dock_2.addWidget(self.fft_plot_widget)
 
         self.graph_layout.addWidget(dock_area)
@@ -547,7 +548,8 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), connect='pairs')
         self.fft_plot_widget.addItem(self.fft_plot)
         padding = 0
-        self.plot_widget.setXRange(0-padding,self.buffer_size/self.fs + padding)
+        self.plot_widget.setXRange(0,self.buffer_size/self.fs,padding)
+        self.fft_plot_widget.getViewBox().enableAutoRange(enable=False)
 
     def startCapture(self):
         if not self.is_capturing:
