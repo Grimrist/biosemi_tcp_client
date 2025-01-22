@@ -27,6 +27,8 @@ if len(sys.argv) > 1 and sys.argv[1] == "-d":
 
 from serial import SerialHandler
 from file_tab import FileTab
+from real_time_plot import RealTimePlot
+
 # MainWindow holds all other windows, initializes the settings,
 # and connects every needed signal to its respective slot.
 class MainWindow(QtWidgets.QMainWindow):
@@ -496,7 +498,7 @@ class GraphWindow(QtWidgets.QWidget):
         dock_2 = Dock("Dock 2")
         dock_area.addDock(dock_1, 'top')
         dock_area.addDock(dock_2, 'bottom')
-        self.plot_widget = PlotWidget(title="EEG time-domain plot", skipFiniteCheck=True)
+        self.plot_widget = RealTimePlot(title="EEG time-domain plot", skipFiniteCheck=True)
         self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
         self.plot_widget.setLabel('bottom', "Time", "s")
@@ -506,9 +508,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.addItem(grid)
         dock_1.addWidget(self.plot_widget)
 
-        fft_plot_bottom_axis = AxisItem("bottom")
-        fft_plot_left_axis = AxisItem("left")
-        self.fft_plot_widget = PlotWidget(title="Power spectral density graph", axisItems={'bottom': fft_plot_bottom_axis, 'left': fft_plot_left_axis})
+        self.fft_plot_widget = PlotWidget(title="Power spectral density graph")
         self.fft_plot_widget.setLogMode(True, False)
         self.fft_plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.fft_plot_widget.getAxis('left').enableAutoSIPrefix(False)
@@ -520,41 +520,24 @@ class GraphWindow(QtWidgets.QWidget):
 
         self.graph_layout.addWidget(dock_area)
 
-    # Initializes graphs so I don't have to constantly repeat myself
     def initializeGraphs(self):
         fs = self.settings['biosemi']['fs']
         self.buffer_size = int(fs*1.5)
         total_channels = self.electrodes_model.rowCount()
-        self.fs = self.settings['biosemi']['fs']
-        self.samples = self.settings['biosemi']['samples']
-        self.plots.clear()
-        self._last_update = 0
+        self.plot_widget.initializeGraphs(fs, total_channels)
         self._last_fft_update = 0
-        self._received = 0
-        self.time_buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
-        # Generate plots for time-domain graphing
-        self.buffers = []
-        for i in range(total_channels):
-            color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
-            plot = PlotCurveItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs')
-            plot.setSkipFiniteCheck(True)
-            plot.setSegmentedLineMode('on')
-            self.plots.append(plot)
-            self.plot_widget.addItem(plot)
-            plot.hide()
-            buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
-            self.buffers.append(buffer)
         # Generate plot for FFT graphing
         self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), skipFiniteCheck=True, connect='pairs')
         self.fft_plot_widget.addItem(self.fft_plot)
         padding = 0
-        self.plot_widget.setXRange(0,self.buffer_size/self.fs,padding)
+        self.plot_widget.setXRange(0,self.buffer_size/fs,padding)
         self.fft_plot_widget.getViewBox().enableAutoRange(enable=False)
 
     def startCapture(self):
         if not self.is_capturing:
             self.initializeGraphs()
             self.captureStarted.emit()
+            self.plot_widget.setLimits(xMin=0, xMax=1.5)
             self.is_capturing = True
         else:
             self.restart_queued = True
@@ -572,11 +555,8 @@ class GraphWindow(QtWidgets.QWidget):
     # Something is going horribly wrong every time we restart,
     # so we just go nuclear: delete everything and rebuild.
     def cleanup(self):
-        print("Cleaning up")
         self.is_capturing = False
-        for plot in self.plots:
-            self.plot_widget.removeItem(plot)
-            plot.deleteLater()
+        self.plot_widget.cleanup()
         self.fft_plot_widget.removeItem(self.fft_plot)
         self.fft_plot.deleteLater()
         self.disableThresholds()
@@ -610,7 +590,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.worker.finished.connect(self.worker.deleteLater)
         self.data_thread.finished.connect(self.data_thread.deleteLater)
         self.worker.finishedCapture.connect(self.cleanup)
-        self.worker.newDataReceived.connect(self.updatePlots)
+        self.worker.newDataReceived.connect(self.plot_widget.updatePlots)
 
         self.fft_thread = QtCore.QThread()
         self.fft_worker = FFTWorker(self.settings, self.electrodes_model, self.freq_bands_model)
@@ -624,40 +604,6 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_worker.newDataReceived.connect(self.updateFFTPlot)
         self.data_thread.start()
         self.fft_thread.start()
-
-    # Update every plot at once
-    def updatePlots(self, channels, data, time_range):
-        self.update_rate = 5
-        # Scrolling faster than our update rate makes the graphing feel smoother
-        self.scroll_rate = 30
-        self.time_buffer.extend(time_range)
-        self._received += 1
-        for i, channel in enumerate(channels):
-            self.buffers[channel].extend(data[i])
-        if perf_counter_ns() > self._last_update + ((10**9)/self.scroll_rate):
-            if self.time_buffer.is_full:
-                time_unit = time_range[1] - time_range[0]
-                self.plot_widget.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + time_unit)*self._received)
-            self._received = 0
-        if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
-            return
-        self._last_update = perf_counter_ns()
-        time_unit = time_range[1] - time_range[0]
-        (w,h) = self.plot_widget.getViewBox().viewPixelSize()
-        [[xmin, xmax], [ymin, ymax]] = self.plot_widget.getViewBox().viewRange()
-        block_size = int(numpy.ceil(w / time_unit))
-        num_bin = int(numpy.ceil((len(self.time_buffer) // block_size)/2.) * 2)
-        if num_bin < 3:
-            num_bin = 3
-        offset_factor = 4
-        for i, channel in enumerate(channels):
-            buffer = self.buffers[channel].__array__() - offset_factor*i
-            if not ((buffer >= ymin) & (buffer <= ymax)).any():
-                continue
-            time = self.time_buffer.__array__()
-            view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
-            clip = numpy.clip(buffer[view], a_min=ymin, a_max=ymax)
-            self.plots[channel].setData(y=clip, x=time[view])
 
     def updateFFTPlot(self, f, pxx):
         self.fft_rate = 15

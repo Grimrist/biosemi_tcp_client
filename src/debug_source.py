@@ -44,7 +44,7 @@ class DebugWorker(QtCore.QObject):
             for j, i in enumerate(lspace):
                 for _ in range(total_channels):
                     noise = numpy.random.normal(scale=numpy.sqrt(noise_power), size=lspace.shape)
-                    if t < 20: val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*100000 + noise[j]) 
+                    if t < 10: val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*1000 + noise[j]) 
                     else: val_orig = int(numpy.sin(2 * numpy.pi * 10 * i)*10 + noise[j]) 
                     val = (val_orig).to_bytes(3, byteorder='little', signed=True)
                     if(len(val) > 3):
@@ -63,7 +63,7 @@ class DebugWorker(QtCore.QObject):
                 return
 
             t += self.samples/self.fs
-            t = t % 40
+            t = t % 20
             sleep(self.samples/self.fs)
 
     def generateSignalFromFile(self):

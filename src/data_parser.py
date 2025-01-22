@@ -112,9 +112,6 @@ class DataWorker(QtCore.QObject):
             self.finished.emit()
             return
 
-        # Enable connectors that we will be using
-        for i in active_channels:
-            self.plots[i].show()
         attempt_counter = 0
         sample_counter = 0
         self.is_capturing = True
