@@ -1,0 +1,10 @@
+- Grid doesn't seem to work
+    - Assuming it worked, it would still need to autoscale as you zoom out in steps
+
+- Zooming out causes the lines to dissapear since it's essentially a 3d plot
+    - Keep camera panning, but have zoom function just scale the data instead of moving the camera?
+    - Might be an anti-aliasing issue, will have to look into shaders
+
+- No autoscaling, need to add one
+    - Seems pretty easy given how performant it currently is, but need to subsume all the plotting code into its own class 
+      so that it has awareness of the full data

@@ -649,7 +649,7 @@ class GraphWindow(QtWidgets.QWidget):
         # num_bin = int(numpy.ceil((len(self.time_buffer) // block_size)/2.) * 2)
         # if num_bin < 3:
         #     num_bin = 3
-        offset_factor = 4000
+        offset_factor = 40000
         # for i, channel in enumerate(channels):
         #     buffer = self.buffers[channel].__array__() - offset_factor*i
         #     # if not ((buffer >= ymin) & (buffer <= ymax)).any():
