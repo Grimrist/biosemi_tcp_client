@@ -548,7 +548,7 @@ class GraphWindow(QtWidgets.QWidget):
             buffer = RingBuffer(capacity=self.buffer_size, dtype='float32')
             buffer.extend(numpy.zeros(self.buffer_size))
             self.buffers.append(buffer)
-        self.plot = Line(parent=self.viewbox.scene, color=colors, method='gl', connect=connect)
+        self.plot = Line(parent=self.viewbox.scene, color=colors, method='gl', connect=connect, antialias=True)
         # Generate plot for FFT graphing
         self.fft_plot = Line(parent=self.fft_viewbox.scene, method='gl')
 
@@ -637,6 +637,7 @@ class GraphWindow(QtWidgets.QWidget):
             if self.time_buffer.is_full:
                 time_unit = time_range[1] - time_range[0]
                 self.viewbox.camera.pan(((time_range[-1] - time_range[0] + time_unit)*self._received,0))
+                print(self.viewbox.camera.depth_value)
             self._received = 0
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
