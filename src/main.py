@@ -102,8 +102,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.graph_window.toggleFFT)
 
         # Filter settings
-        self.selection_window.decimating_factor_box.valueChanged.connect(self.settings_handler.setDecimatingFactor)
-        self.selection_window.decimating_taps_box.valueChanged.connect(self.settings_handler.setLowpassTaps)
+        # self.selection_window.decimating_factor_box.valueChanged.connect(self.settings_handler.setDecimatingFactor)
+        # self.selection_window.decimating_taps_box.valueChanged.connect(self.settings_handler.setLowpassTaps)
 
         # FFT settings
         self.selection_window.welch_window_box.valueChanged.connect(self.settings_handler.setWelchWindow)
@@ -152,7 +152,10 @@ class MainWindow(QtWidgets.QMainWindow):
         else: self.electrodes_model = QtGui.QStandardItemModel()
         for (group, number) in self.settings['biosemi']['channels'].items():
             for i in range(number):
-                name = QtGui.QStandardItem(group + str(i+1))
+                if group == "A":
+                    name = QtGui.QStandardItem(global_vars.CHANNELS[i])
+                elif group == "B": 
+                    name = QtGui.QStandardItem(global_vars.CHANNELS[i+32])
                 view_status = QtGui.QStandardItem()
                 view_status.setData(QtCore.QVariant(False))
                 ref_status = QtGui.QStandardItem()
@@ -277,6 +280,8 @@ class SelectionWindow(QtWidgets.QTabWidget):
         self.channel_selector.setModel(electrodes_model)
         self.channel_selector.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
         channel_layout.addWidget(self.channel_selector)
+        item_height = self.channel_selector.visualRect(self.channel_selector.indexAt(QtCore.QPoint(0,0))).height()
+        self.channel_selector.setMinimumHeight(item_height*10)
         channel_frame.setLayout(channel_layout)
         selection_layout.addWidget(channel_frame)
 
@@ -302,28 +307,28 @@ class SelectionWindow(QtWidgets.QTabWidget):
         selection_layout.addItem(verticalSpacer) 
 
         # Filter settings
-        filter_frame = QtWidgets.QFrame()
-        filter_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
-        filter_layout = QtWidgets.QVBoxLayout()
+        # filter_frame = QtWidgets.QFrame()
+        # filter_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
+        # filter_layout = QtWidgets.QVBoxLayout()
 
-        filter_settings = QtWidgets.QWidget()
-        filter_settings_layout = QtWidgets.QFormLayout()
-        self.decimating_factor_box = QtWidgets.QSpinBox()
-        self.decimating_factor_box.setRange(1, 2**31-1)
-        self.decimating_factor_box.setValue(self.settings['filter']['decimating_factor'])
-        filter_settings_layout.addRow(QtWidgets.QLabel("Decimating factor"), self.decimating_factor_box)
-        self.decimating_taps_box = QtWidgets.QSpinBox()
-        self.decimating_taps_box.setRange(0, 2**31-1)
-        self.decimating_taps_box.setValue(self.settings['filter']['lowpass_taps'])
-        filter_settings_layout.addRow(QtWidgets.QLabel("Alias filter taps"), self.decimating_taps_box)
-        filter_settings.setLayout(filter_settings_layout)
+        # filter_settings = QtWidgets.QWidget()
+        # filter_settings_layout = QtWidgets.QFormLayout()
+        # self.decimating_factor_box = QtWidgets.QSpinBox()
+        # self.decimating_factor_box.setRange(1, 2**31-1)
+        # self.decimating_factor_box.setValue(self.settings['filter']['decimating_factor'])
+        # filter_settings_layout.addRow(QtWidgets.QLabel("Decimating factor"), self.decimating_factor_box)
+        # self.decimating_taps_box = QtWidgets.QSpinBox()
+        # self.decimating_taps_box.setRange(0, 2**31-1)
+        # self.decimating_taps_box.setValue(self.settings['filter']['lowpass_taps'])
+        # filter_settings_layout.addRow(QtWidgets.QLabel("Alias filter taps"), self.decimating_taps_box)
+        # filter_settings.setLayout(filter_settings_layout)
 
-        filter_layout.addWidget(filter_settings)
-        filter_frame.setLayout(filter_layout)
-        selection_layout.addWidget(filter_frame)
+        # filter_layout.addWidget(filter_settings)
+        # filter_frame.setLayout(filter_layout)
+        # selection_layout.addWidget(filter_frame)
 
-        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
-        selection_layout.addItem(verticalSpacer) 
+        # verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        # selection_layout.addItem(verticalSpacer) 
 
         # FFT settings
         fft_frame = QtWidgets.QFrame()
