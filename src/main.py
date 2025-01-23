@@ -3,6 +3,7 @@ from settings import SettingsHandler
 import sys
 from PyQt6 import QtWidgets, QtCore, QtGui, QtSerialPort
 import pyqtgraph
+import pyqtgraph.exporters
 import OpenGL
 pyqtgraph.setConfigOption('useOpenGL', True)
 pyqtgraph.setConfigOption('enableExperimental', True)
@@ -104,6 +105,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # Filter settings
         # self.selection_window.decimating_factor_box.valueChanged.connect(self.settings_handler.setDecimatingFactor)
         # self.selection_window.decimating_taps_box.valueChanged.connect(self.settings_handler.setLowpassTaps)
+
+        # Screenshot control
+        self.selection_window.screenshot_plot_button.clicked.connect(self.graph_window.screenshotTimePlot)
+        self.selection_window.screenshot_fft_button.clicked.connect(self.graph_window.screenshotFFTPlot)
 
         # FFT settings
         self.selection_window.welch_window_box.valueChanged.connect(self.settings_handler.setWelchWindow)
@@ -280,8 +285,8 @@ class SelectionWindow(QtWidgets.QTabWidget):
         self.channel_selector.setModel(electrodes_model)
         self.channel_selector.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
         channel_layout.addWidget(self.channel_selector)
-        item_height = self.channel_selector.visualRect(self.channel_selector.indexAt(QtCore.QPoint(0,0))).height()
-        self.channel_selector.setMinimumHeight(item_height*10)
+        # item_height = self.channel_selector.visualRect(self.channel_selector.indexAt(QtCore.QPoint(0,0))).height()
+        # self.channel_selector.setMinimumHeight(item_height*10)
         channel_frame.setLayout(channel_layout)
         selection_layout.addWidget(channel_frame)
 
@@ -329,6 +334,23 @@ class SelectionWindow(QtWidgets.QTabWidget):
 
         # verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         # selection_layout.addItem(verticalSpacer) 
+
+        # Screenshot settings
+        screenshot_frame = QtWidgets.QFrame()
+        screenshot_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
+        screenshot_layout = QtWidgets.QVBoxLayout()
+
+        self.screenshot_plot_button = QtWidgets.QPushButton("Screenshot time plot")
+        self.screenshot_fft_button = QtWidgets.QPushButton("Screenshot FFT plot")
+
+        screenshot_layout.addWidget(self.screenshot_plot_button)
+        screenshot_layout.addWidget(self.screenshot_fft_button)
+
+        screenshot_frame.setLayout(screenshot_layout)
+        selection_layout.addWidget(screenshot_frame)
+
+        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        selection_layout.addItem(verticalSpacer) 
 
         # FFT settings
         fft_frame = QtWidgets.QFrame()
@@ -624,6 +646,14 @@ class GraphWindow(QtWidgets.QWidget):
             return
         self.fft_plot.setData(y=pxx, x=f)
         self._last_fft_update = perf_counter_ns()
+
+    def screenshotTimePlot(self, plot):
+        exporter = pyqtgraph.exporters.ImageExporter(self.plot_widget.getPlotItem())
+        exporter.export('time_plot.png')
+
+    def screenshotFFTPlot(self, plot):
+        exporter = pyqtgraph.exporters.ImageExporter(self.fft_plot_widget.getPlotItem())
+        exporter.export('fft_plot.png')
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):

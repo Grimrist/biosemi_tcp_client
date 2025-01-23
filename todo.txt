@@ -12,3 +12,9 @@
 - Separate file reading functionality from DebugWorker to provide the functionality to regular users
 - Somehow fix time-domain plot so that it can properly auto range to where the data is when it's clipped out of view
     - Probably need to move all the logic into a class inherited from the plot widget so I can make the autorange button use the full data
+
+- Rewrite PlotCurveItem to handle multiple sets of data with multiple colors all at once
+    - This will probably involve either glMultiDrawArrays() or GL_LINES, not clear which is better
+    - Needs to handle multiple colors, using glColorPointer
+
+    PO7 faulty
