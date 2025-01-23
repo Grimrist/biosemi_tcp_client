@@ -28,6 +28,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "-d":
 from serial import SerialHandler
 from file_tab import FileTab
 from real_time_plot import RealTimePlot
+from utils import LogAxis
 
 # MainWindow holds all other windows, initializes the settings,
 # and connects every needed signal to its respective slot.
@@ -501,6 +502,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget = RealTimePlot(title="EEG time-domain plot", skipFiniteCheck=True)
         self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
+        self.plot_widget.getAxis('bottom').setStyle(autoReduceTextSpace=True)
         self.plot_widget.setLabel('bottom', "Time", "s")
         self.plot_widget.setLabel('left', "Magnitude", "uV")
         self.plot_widget.getViewBox().disableAutoRange()
@@ -508,13 +510,16 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.addItem(grid)
         dock_1.addWidget(self.plot_widget)
 
-        self.fft_plot_widget = PlotWidget(title="Power spectral density graph")
+        fft_bottom_axis = LogAxis('bottom')
+        self.fft_plot_widget = PlotWidget(title="Power spectral density graph", axisItems={'bottom':fft_bottom_axis})
         self.fft_plot_widget.setLogMode(True, False)
         self.fft_plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.fft_plot_widget.getAxis('left').enableAutoSIPrefix(False)
+        grid = GridItem()
+        grid.setTickSpacing(x=[1.0])
+        self.fft_plot_widget.addItem(grid)
         self.fft_plot_widget.setLabel('bottom', "Frequency", "Hz")
         self.fft_plot_widget.setLabel('left', "Power", "dB")
-        self.fft_plot_widget.getAxis('bottom').setStyle(tickTextWidth=1)
     
         dock_2.addWidget(self.fft_plot_widget)
 
@@ -532,6 +537,9 @@ class GraphWindow(QtWidgets.QWidget):
         padding = 0
         self.plot_widget.setXRange(0,self.buffer_size/fs,padding)
         self.fft_plot_widget.getViewBox().enableAutoRange(enable=False)
+        # We can completely predict the range of the spectrum, so we clamp the view ahead of time
+        # I have no idea why this doesn't work for the xMin, some kind of artifact of the log implementation
+        # self.fft_plot_widget.setLimits(xMin=0.01, xMax=numpy.log10(fs/2))
 
     def startCapture(self):
         if not self.is_capturing:

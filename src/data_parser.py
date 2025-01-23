@@ -1,11 +1,9 @@
 from PyQt6 import QtCore
 
 import numpy
-from scipy import signal, fft
-from dvg_ringbuffer import RingBuffer
 import global_vars
-from time import sleep, perf_counter_ns
 import socket
+from time import sleep
 
 ## Class definition for thread that receives data
 # This was decoupled from the main application as it needed some custom signals for proper termination
@@ -65,7 +63,6 @@ class DataWorker(QtCore.QObject):
         self.initializeData(self.settings, self.electrodes_model, self.freq_bands_model)
         x = 0
         packet_failed = 0
-        decimate_enabled = False
         active_channels = []
         active_reference = -1
 
@@ -87,12 +84,6 @@ class DataWorker(QtCore.QObject):
         # how often we need to update in terms of samples received
         update_rate = int(numpy.ceil(self.fs / 20 / self.samples))
         print("Update rate in packet count (aiming for 20 Hz):", update_rate)
-
-        decimate_factor = self.settings['filter']['decimating_factor']
-        if decimate_factor > 1: 
-            decimate_enabled = True
-            alias_filter = signal.firwin(numtaps=self.settings['filter']['lowpass_taps'], cutoff=self.fs/decimate_factor, pass_zero='lowpass', fs=self.fs)
-        zf = [None for i in range(len(self.plots)-1)]
 
         # Determine which channels we're interested in reading from
         for i in range(total_channels):
@@ -142,7 +133,6 @@ class DataWorker(QtCore.QObject):
                     # Each data packet comes with multiple 3-byte samples at a time, interleaved such that
                     # the first sample of each channel is sent, then the second sample, and so on.
                     # First we reshape the matrix such that each row is one 24-bit integer
-                    start_test = perf_counter_ns()
                     reshaped_data = numpy.frombuffer(buffer=data, dtype='<b').reshape(-1, 3)
 
                     # De-interleave by transposing (Fortran order) and then reshaping into (channels * samples * bytes) shaped array
@@ -161,8 +151,6 @@ class DataWorker(QtCore.QObject):
                     # We apply the reference value and gain
                     samples = (samples - ref_values)*self.gain
                     active_buffers = []
-                    stop = perf_counter_ns()
-                    # print("Processing time (ms):", (stop - start)/(10**6) )
 
                     # Send sample to plot
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
@@ -185,7 +173,7 @@ class DataWorker(QtCore.QObject):
                         return
 
                     x += self.samples
-                    sample_counter = (sample_counter + self.samples) % decimate_factor
+                    sample_counter = (sample_counter + self.samples)
                     if packet_failed > 0:
                         packet_failed -= 1
                     
