@@ -59,14 +59,13 @@ class RealTimePlot(PlotWidget):
         if num_bin < 3:
             num_bin = 3
         self.offset_factor = 400
-        for i, channel in enumerate(channels):
-            buffer = self.buffers[channel].__array__() - self.offset_factor*i
-            if not ((buffer >= ymin) & (buffer <= ymax)).any():
-                continue
-            time = self.time_buffer.__array__()
-            view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
-            clip = numpy.clip(buffer[view], a_min=ymin, a_max=ymax)
-            self.plot.setData(y=clip, x=time[view], colors=color)
+        # buffer = self.buffers[channel].__array__() - self.offset_factor*i
+        if not ((buffer >= ymin) & (buffer <= ymax)).any():
+            continue
+        time = self.time_buffer.__array__()
+        view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
+        clip = numpy.clip(buffer[view], a_min=ymin, a_max=ymax)
+        self.plot.setData(y=clip, x=time[view], colors=color)
 
     def autoscaleToData(self, item):
         idx = self.plots.index(item)
