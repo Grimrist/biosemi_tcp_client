@@ -4,6 +4,7 @@ from dvg_ringbuffer import RingBuffer
 from time import perf_counter_ns
 import numpy
 import tsdownsample
+from utils import PlotMultiCurveItem
 
 class RealTimePlot(PlotWidget):
     def initializeGraphs(self, fs, total_channels):
@@ -15,23 +16,23 @@ class RealTimePlot(PlotWidget):
         # Generate plots for time-domain graphing
         self.plots = []
         self.buffers = []
+        # Pre-emptively generate color array for curves
+        self.colors = numpy.zeros((total_channels, 4))
         for i in range(total_channels):
-            color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
-            plot = PlotCurveItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs', clickable=True)
-            plot.sigClicked.connect(self.autoscaleToData)
-            plot.setSkipFiniteCheck(True)
-            plot.setSegmentedLineMode('on')
-            self.addItem(plot)
-            self.plots.append(plot)
-            buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
-            self.buffers.append(buffer)
+            self.colors[i,:] = [i/(total_channels), 0.8, 0.9, 1]
+        self.plot = PlotMultiCurveItem(skipFiniteCheck=True, connect='pairs', clickable=True)
+        self.plot.sigClicked.connect(self.autoscaleToData)
+        self.plot.setSkipFiniteCheck(True)
+        self.plot.setSegmentedLineMode('on')
+        self.addItem(self.plot)
+        buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
+        self.buffers.append(buffer)
 
     def cleanup(self):
         print("Cleaning up")
         self.is_capturing = False
-        for plot in self.plots:
-            self.removeItem(plot)
-            plot.deleteLater()
+        self.removeItem(self.plot)
+        self.plot.deleteLater()
 
     def updatePlots(self, channels, data, time_range):
         self.update_rate = 5
@@ -65,7 +66,7 @@ class RealTimePlot(PlotWidget):
             time = self.time_buffer.__array__()
             view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
             clip = numpy.clip(buffer[view], a_min=ymin, a_max=ymax)
-            self.plots[channel].setData(y=clip, x=time[view])
+            self.plot.setData(y=clip, x=time[view], colors=color)
 
     def autoscaleToData(self, item):
         idx = self.plots.index(item)

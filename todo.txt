@@ -17,4 +17,4 @@
     - This will probably involve either glMultiDrawArrays() or GL_LINES, not clear which is better
     - Needs to handle multiple colors, using glColorPointer
 
-    PO7 faulty
+PO7 faulty
