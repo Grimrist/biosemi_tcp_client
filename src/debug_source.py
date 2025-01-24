@@ -74,8 +74,9 @@ class DebugWorker(QtCore.QObject):
         f = pyedflib.EdfReader(self.settings['file']['current_file'])
         n = f.signals_in_file
         signal_labels = f.getSignalLabels()
-        sigbufs = numpy.zeros((n, f.getNSamples()[0]), dtype=numpy.int16)
-        for i in numpy.arange(n):
+        print(signal_labels)
+        sigbufs = numpy.zeros((total_channels, f.getNSamples()[0]), dtype=numpy.int16)
+        for i in numpy.arange(total_channels):
             sigbufs[i, :] = f.readSignal(i)
         file_length = sigbufs.shape[1]
         sigbufs_bytes = bytearray()
