@@ -1,4 +1,3 @@
-import socket   # used for TCP/IP communication
 from settings import SettingsHandler    
 import sys
 from PyQt6 import QtWidgets, QtCore, QtGui, QtSerialPort
@@ -10,7 +9,7 @@ pyqtgraph.setConfigOption('enableExperimental', True)
 pyqtgraph.setConfigOption('antialias', False)
 pyqtgraph.setConfigOption('exitCleanup', True)
 
-from pyqtgraph import PlotCurveItem, PlotWidget, AxisItem, GridItem, PlotDataItem
+from pyqtgraph import PlotCurveItem, PlotWidget, AxisItem, GridItem, PlotDataItem, BarGraphItem, GraphicsView, InfiniteLine
 from pyqtgraph.dockarea import Dock, DockArea
 
 from data_parser import DataWorker
@@ -29,7 +28,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "-d":
 from serial import SerialHandler
 from file_tab import FileTab
 from real_time_plot import RealTimePlot
-from utils import LogAxis
+from utils import LogAxis, CustomPlotItem
 
 # MainWindow holds all other windows, initializes the settings,
 # and connects every needed signal to its respective slot.
@@ -96,7 +95,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
         self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
         if global_vars.DEBUG:
-            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignalFromFile)
+            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignal)
         self.graph_window.captureStarted.connect(self.graph_window.worker.readData)
         self.graph_window.captureStarted.connect(self.graph_window.fft_worker.initializeWorker)
 
@@ -126,8 +125,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Thresholds
         # Just a quick prototype, this needs more robust support
         self.selection_window.alpha_threshold_box.editingFinished.connect(self.updateAlphaThreshold)
-
         self.freq_bands_model.thresholdChanged.connect(self.selection_window.updateThresholdDisplay)
+        self.graph_window.fft_worker.bandsUpdated.connect(self.selection_window.updateBandDisplay)
 
         # File view settings
         self.selection_window.file_tab.activeFileChanged.connect(self.settings_handler.setFile)
@@ -213,6 +212,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.graph_window.debug_thread.wait(100)
         self.graph_window.fft_plot_widget.close()
         self.graph_window.plot_widget.close()
+        self.selection_window.freq_bands_view.close()
         event.accept()        
 
 # SelectionWindow implements all the configuration UI,
@@ -335,23 +335,6 @@ class SelectionWindow(QtWidgets.QTabWidget):
         # verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         # selection_layout.addItem(verticalSpacer) 
 
-        # Screenshot settings
-        screenshot_frame = QtWidgets.QFrame()
-        screenshot_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
-        screenshot_layout = QtWidgets.QVBoxLayout()
-
-        self.screenshot_plot_button = QtWidgets.QPushButton("Screenshot time plot")
-        self.screenshot_fft_button = QtWidgets.QPushButton("Screenshot FFT plot")
-
-        screenshot_layout.addWidget(self.screenshot_plot_button)
-        screenshot_layout.addWidget(self.screenshot_fft_button)
-
-        screenshot_frame.setLayout(screenshot_layout)
-        selection_layout.addWidget(screenshot_frame)
-
-        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
-        selection_layout.addItem(verticalSpacer) 
-
         # FFT settings
         fft_frame = QtWidgets.QFrame()
         fft_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
@@ -388,6 +371,22 @@ class SelectionWindow(QtWidgets.QTabWidget):
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         selection_layout.addItem(verticalSpacer) 
 
+        # Screenshot settings
+        screenshot_frame = QtWidgets.QWidget()
+        screenshot_layout = QtWidgets.QVBoxLayout()
+
+        self.screenshot_plot_button = QtWidgets.QPushButton("Screenshot time plot")
+        self.screenshot_fft_button = QtWidgets.QPushButton("Screenshot FFT plot")
+
+        screenshot_layout.addWidget(self.screenshot_plot_button)
+        screenshot_layout.addWidget(self.screenshot_fft_button)
+
+        screenshot_frame.setLayout(screenshot_layout)
+        selection_layout.addWidget(screenshot_frame)
+
+        verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        selection_layout.addItem(verticalSpacer) 
+
         # Serial configuration
         serial_frame = QtWidgets.QFrame()
         serial_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
@@ -417,6 +416,7 @@ class SelectionWindow(QtWidgets.QTabWidget):
         self.serial_checkbox.setChecked(self.settings['serial']['enabled'])
         serial_layout.addWidget(self.serial_checkbox)
 
+        # Finish building tab
         settings_window.setLayout(selection_layout)
         self.addTab(settings_window, "Settings")
 
@@ -427,26 +427,53 @@ class SelectionWindow(QtWidgets.QTabWidget):
         measurements_window = QtWidgets.QWidget()
         measurements_layout = QtWidgets.QVBoxLayout()
 
-        freq_bands_table = QtWidgets.QTableView()
-        freq_bands_table.setModel(freq_bands_model)
-        # freq_bands_table.setColumnHidden(2, True)
-        # freq_bands_table.setColumnHidden(3, True)
-        measurements_layout.addWidget(freq_bands_table)
+        # Bar chart to display band intensity
+        band_frame = QtWidgets.QFrame()
+        band_layout = QtWidgets.QVBoxLayout()
+        band_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
+        self.freq_bands_view = PlotWidget(background=pyqtgraph.mkColor("#455A64"))
+        self.freq_bands_view.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Minimum)
+        self.freq_bands_view.setMaximumWidth(300)
+        self.freq_bands_view.setMaximumHeight(300)
+        total_bands = len(global_vars.FREQ_BANDS.keys())
+        band_width = 0.8
+        color = pyqtgraph.mkColor("#808080")
+        self.freq_bands_chart = BarGraphItem(height=0.1, width=band_width, x=range(total_bands), y0=0, brushes=[color]*total_bands)
+        ax = self.freq_bands_view.getAxis('bottom')
+        grey = pyqtgraph.mkColor("#d4d4d4")
+        ax.setTextPen(grey)
+        ax.setPen(grey)
+        ax.setTicks([[(i, band) for i,band in enumerate(global_vars.FREQ_BANDS.keys())],[]])
+        ax = self.freq_bands_view.getAxis('left')
+        ax.setTextPen(grey)
+        ax.setPen(grey)
+        self.freq_bands_view.addItem(self.freq_bands_chart)
+        self.freq_bands_view.setRange(xRange=[0-(band_width/1.5),4+(band_width/1.5)], yRange=[0,1.05], disableAutoRange=True, padding=0)
+        self.freq_bands_view.setMouseEnabled(x=False,y=False)
+        self.freq_bands_view.hideButtons()
+        alpha_threshold = self.settings['threshold']['alpha']
+        self.threshold_line = InfiniteLine(angle=0, pen='r', label='Alpha', pos=alpha_threshold, movable=True, bounds=[0,1])
+        self.threshold_line.sigPositionChangeFinished.connect(self.setAlphaThresholdFromLine)
+        self.freq_bands_view.addItem(self.threshold_line)
+        band_layout.addWidget(self.freq_bands_view)
+        band_frame.setLayout(band_layout)
+        measurements_layout.addWidget(band_frame)
         
         # Thresholds
-        threshold_settings = QtWidgets.QWidget()
-        threshold_settings_layout = QtWidgets.QFormLayout()
+        threshold_widget = QtWidgets.QWidget()
+        threshold_layout = QtWidgets.QFormLayout()
         self.alpha_threshold_box = QtWidgets.QDoubleSpinBox()
         self.alpha_threshold_box.setRange(0, 1)
         self.alpha_threshold_box.setValue(self.settings['threshold']['alpha'])
-        threshold_settings_layout.addRow(QtWidgets.QLabel("Alpha threshold"), self.alpha_threshold_box)
-        threshold_settings.setLayout(threshold_settings_layout)
-        measurements_layout.addWidget(threshold_settings)
+        threshold_layout.addRow(QtWidgets.QLabel("Alpha threshold"), self.alpha_threshold_box)
+        threshold_widget.setLayout(threshold_layout)
+        band_layout.addWidget(threshold_widget)
 
         # TODO: Revisit this eventually, feels like it could be designed better
         self.red_icon = QtGui.QPixmap("./icons/red_icon.png")
         self.black_icon = QtGui.QPixmap("./icons/black_icon.png")
-        indicator_widget = QtWidgets.QWidget()
+        indicator_frame = QtWidgets.QFrame()
+        indicator_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
         indicator_layout = QtWidgets.QFormLayout()
         self.band_indicators = []
         for freq_band in global_vars.FREQ_BANDS.keys():
@@ -455,8 +482,8 @@ class SelectionWindow(QtWidgets.QTabWidget):
             indicator_img.setPixmap(self.black_icon)
             indicator_layout.addRow(indicator_img, indicator)
             self.band_indicators.append((indicator, indicator_img))
-        indicator_widget.setLayout(indicator_layout)
-        measurements_layout.addWidget(indicator_widget)
+        indicator_frame.setLayout(indicator_layout)
+        measurements_layout.addWidget(indicator_frame)
         
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         measurements_layout.addItem(verticalSpacer) 
@@ -465,12 +492,16 @@ class SelectionWindow(QtWidgets.QTabWidget):
 
     def updateThresholdDisplay(self, index, status):
         band = self.band_indicators[index.row()][0].text().split()[0]
+        color = pyqtgraph.mkColor("#808080")
         if status:
             self.band_indicators[index.row()][0].setText(band + " over threshold")
             self.band_indicators[index.row()][1].setPixmap(self.red_icon)
+            red = pyqtgraph.mkColor("#ff0000")
+            self.freq_bands_chart.setOpts(brushes=[color,color,red,color,color])
         else:
             self.band_indicators[index.row()][0].setText(band + " under threshold")
             self.band_indicators[index.row()][1].setPixmap(self.black_icon)
+            self.freq_bands_chart.setOpts(brushes=[color]*5)
 
         ## Temporary placement, this might need its own class
         if band == "Alpha":
@@ -485,9 +516,19 @@ class SelectionWindow(QtWidgets.QTabWidget):
     def sendEnableSignal(self):
         self.sendSerial.emit(b'1')
 
+    # These two functions really need to be generalized
     def setAlphaThreshold(self, value):
         alpha = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, "Alpha")[0]
         self.freq_bands_model.setData(alpha.siblingAtColumn(2), value)
+        self.threshold_line.setValue(value)
+
+    def setAlphaThresholdFromLine(self, ev):
+        value = self.threshold_line.value()
+        self.alpha_threshold_box.setValue(value)
+        self.setAlphaThreshold(value)
+
+    def updateBandDisplay(self, bands):
+        self.freq_bands_chart.setOpts(height=bands)
 
 # GraphWindow currently serves the dual purpose of handling the graph display as well as
 # implementing the plotting logic itself. It might be a good idea to separate the two
@@ -526,7 +567,7 @@ class GraphWindow(QtWidgets.QWidget):
         dock_2 = Dock("Dock 2")
         dock_area.addDock(dock_1, 'top')
         dock_area.addDock(dock_2, 'bottom')
-        self.plot_widget = RealTimePlot(title="EEG time-domain plot", skipFiniteCheck=True)
+        self.plot_widget = RealTimePlot(plotItem=CustomPlotItem(title="EEG time-domain plot"))
         self.plot_widget.getAxis('bottom').enableAutoSIPrefix(False)
         self.plot_widget.getAxis('left').enableAutoSIPrefix(False)
         self.plot_widget.getAxis('bottom').setStyle(autoReduceTextSpace=True)
@@ -559,7 +600,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.initializeGraphs(fs, total_channels)
         self._last_fft_update = 0
         # Generate plot for FFT graphing
-        self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), skipFiniteCheck=True, connect='pairs')
+        self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), skipFiniteCheck=True)
         self.fft_plot_widget.addItem(self.fft_plot)
         padding = 0
         self.plot_widget.setXRange(0,self.buffer_size/fs,padding)

@@ -40,7 +40,7 @@ class DebugWorker(QtCore.QObject):
         while True:
             data = bytearray()
             lspace = numpy.linspace(t, t+(self.samples/self.fs), self.samples)
-            noise_power = 1000 * self.fs/2
+            noise_power = 0 * self.fs/2
             for j, i in enumerate(lspace):
                 for _ in range(total_channels):
                     noise = numpy.random.normal(scale=numpy.sqrt(noise_power), size=lspace.shape)

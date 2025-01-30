@@ -1,4 +1,7 @@
-from pyqtgraph import AxisItem
+from pyqtgraph import AxisItem, PlotItem, ButtonItem
+import pyqtgraph.exporters
+
+from PyQt6 import QtWidgets, QtGui
 import numpy as np
 import math
 
@@ -85,3 +88,37 @@ class LogAxis(AxisItem):
         # if not self._height_updated:
         #     self.setHeight(self.height() + max_width)
         #     self._height_updated = True
+
+# Plot item extended to include a screenshot button
+class CustomPlotItem(PlotItem):
+    def __init__(self, parent=None, name=None, labels=None, title=None, viewBox=None, axisItems=None, enableMenu=True, **kargs):
+        super().__init__(parent, name, labels, title, viewBox, axisItems, enableMenu, **kargs)
+        icon = QtGui.QPixmap("./icons/camera_inv.png")
+        self.ssBtn = ButtonItem(pixmap=icon, width=14, parentItem=self)
+        self.ssBtn.mode = 'auto'
+        self.ssBtn.clicked.connect(self.ssBtnClicked)
+
+    def resizeEvent(self, ev):
+        if self.autoBtn is not None:  ## already closed down
+            btnRect = self.mapRectFromItem(self.autoBtn, self.autoBtn.boundingRect())
+            y = self.size().height() - btnRect.height()
+            self.autoBtn.setPos(0, y)
+        if self.ssBtn is not None:
+            btnRect = self.mapRectFromItem(self.autoBtn, self.autoBtn.boundingRect())
+            y = self.size().height() - btnRect.height()
+            self.ssBtn.setPos(15, y)
+    
+    def ssBtnClicked(self, ev):
+        exporter = pyqtgraph.exporters.ImageExporter(self)
+        exporter.export("time_plot.png")
+
+    def updateButtons(self):
+        try:
+            if self._exportOpts is False and self.mouseHovering and not self.buttonsHidden:
+                self.autoBtn.show()
+                self.ssBtn.show()
+            else:
+                self.autoBtn.hide()
+                self.ssBtn.hide()
+        except RuntimeError:
+            pass  # this can happen if the plot has been deleted.

@@ -1,4 +1,4 @@
-from pyqtgraph import PlotWidget, PlotCurveItem
+from pyqtgraph import PlotWidget, PlotCurveItem, PlotItem
 import pyqtgraph
 from dvg_ringbuffer import RingBuffer
 from time import perf_counter_ns
@@ -17,7 +17,7 @@ class RealTimePlot(PlotWidget):
         self.buffers = []
         for i in range(total_channels):
             color = pyqtgraph.hsvColor(i/(total_channels), 0.8, 0.9)
-            plot = PlotCurveItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, connect='pairs', clickable=True)
+            plot = PlotCurveItem(pen=pyqtgraph.mkPen(color=color, width=1), skipFiniteCheck=True, clickable=True)
             plot.sigClicked.connect(self.autoscaleToData)
             plot.setSkipFiniteCheck(True)
             plot.setSegmentedLineMode('on')

@@ -12,6 +12,7 @@ import global_vars
 class FFTWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
     newDataReceived = QtCore.pyqtSignal(numpy.ndarray, numpy.ndarray)
+    bandsUpdated = QtCore.pyqtSignal(list)
 
     def __init__(self, settings, electrodes_model, freq_bands_model):
         super().__init__()
@@ -56,6 +57,7 @@ class FFTWorker(QtCore.QObject):
         pxx[pxx == 0] = 0.0000000001
         log_pxx = 10*numpy.log10(pxx*1000)
         self.newDataReceived.emit(f, log_pxx)
+        divs = []
         for band, [lower, upper] in global_vars.FREQ_BANDS.items():
             freq_filter = (f >= lower) & (f <= upper)
             band_values = pxx[freq_filter]
@@ -65,4 +67,6 @@ class FFTWorker(QtCore.QObject):
             if pxx_sum == 0 or band_sum == 0:
                 div = 0
             else: div = float(band_sum / pxx_sum)
+            divs.append(div)
             self.freq_bands_model.setValue(idx.siblingAtColumn(1), div)
+        self.bandsUpdated.emit(divs)
