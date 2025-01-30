@@ -34,6 +34,8 @@ class SettingsHandler():
         self.settings.setdefault("filter", {})
         self.settings['filter'].setdefault("decimating_factor", 1)
         self.settings['filter'].setdefault("lowpass_taps", 101)
+        self.settings.setdefault("view", {})
+        self.settings['view'].setdefault('rolling_enabled', False)
         self.settings.setdefault("fft", {})
         self.settings['fft'].setdefault("welch_enabled", True)
         self.settings['fft'].setdefault("welch_window", 2048*4)
@@ -124,3 +126,9 @@ class SettingsHandler():
 
     def setDirectory(self, directory):
         self.settings['file']['directory'] = str(directory)
+
+    def setRollingEnabled(self, enable):
+        if(enable == Qt.CheckState.Checked):
+            self.settings['view']['rolling_enabled'] = True
+        else:
+            self.settings['view']['rolling_enabled'] = False

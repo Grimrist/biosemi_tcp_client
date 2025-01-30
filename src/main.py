@@ -95,7 +95,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
         self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
         if global_vars.DEBUG:
-            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignal)
+            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignalFromFile)
         self.graph_window.captureStarted.connect(self.graph_window.worker.readData)
         self.graph_window.captureStarted.connect(self.graph_window.fft_worker.initializeWorker)
 
@@ -105,9 +105,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # self.selection_window.decimating_factor_box.valueChanged.connect(self.settings_handler.setDecimatingFactor)
         # self.selection_window.decimating_taps_box.valueChanged.connect(self.settings_handler.setLowpassTaps)
 
-        # Screenshot control
-        self.selection_window.screenshot_plot_button.clicked.connect(self.graph_window.screenshotTimePlot)
-        self.selection_window.screenshot_fft_button.clicked.connect(self.graph_window.screenshotFFTPlot)
+        # View control
+        self.selection_window.rolling_checkbox.clicked.connect(self.graph_window.setRollingView)
+        self.selection_window.rolling_checkbox.clicked.connect(self.settings_handler.setRollingEnabled)
 
         # FFT settings
         self.selection_window.welch_window_box.valueChanged.connect(self.settings_handler.setWelchWindow)
@@ -371,18 +371,18 @@ class SelectionWindow(QtWidgets.QTabWidget):
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         selection_layout.addItem(verticalSpacer) 
 
-        # Screenshot settings
-        screenshot_frame = QtWidgets.QWidget()
-        screenshot_layout = QtWidgets.QVBoxLayout()
+        # View settings
+        view_frame = QtWidgets.QFrame()
+        view_frame.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Raised)
+        view_layout = QtWidgets.QVBoxLayout()
 
-        self.screenshot_plot_button = QtWidgets.QPushButton("Screenshot time plot")
-        self.screenshot_fft_button = QtWidgets.QPushButton("Screenshot FFT plot")
+        self.rolling_checkbox = QtWidgets.QCheckBox("Rolling view")
+        self.rolling_checkbox.setChecked(self.settings['view']['rolling_enabled'])
 
-        screenshot_layout.addWidget(self.screenshot_plot_button)
-        screenshot_layout.addWidget(self.screenshot_fft_button)
+        view_layout.addWidget(self.rolling_checkbox)
 
-        screenshot_frame.setLayout(screenshot_layout)
-        selection_layout.addWidget(screenshot_frame)
+        view_frame.setLayout(view_layout)
+        selection_layout.addWidget(view_frame)
 
         verticalSpacer = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         selection_layout.addItem(verticalSpacer) 
@@ -544,6 +544,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.welch_enabled = True
         self.is_capturing = False
         self.restart_queued = False
+        self.rolling_view = self.settings['view']['rolling_enabled']
         self.graph_layout = QtWidgets.QVBoxLayout()
         self.initializePlotWidgets()
         if not self.settings['fft']['welch_enabled']:
@@ -595,9 +596,10 @@ class GraphWindow(QtWidgets.QWidget):
 
     def initializeGraphs(self):
         fs = self.settings['biosemi']['fs']
-        self.buffer_size = int(fs*1.5)
         total_channels = self.electrodes_model.rowCount()
-        self.plot_widget.initializeGraphs(fs, total_channels)
+        time_length = 8 # Data buffer length in seconds
+        self.buffer_size = int(fs*time_length)
+        self.plot_widget.initializeGraphs(fs, total_channels, self.buffer_size, self.rolling_view)
         self._last_fft_update = 0
         # Generate plot for FFT graphing
         self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), skipFiniteCheck=True)
@@ -613,7 +615,7 @@ class GraphWindow(QtWidgets.QWidget):
         if not self.is_capturing:
             self.initializeGraphs()
             self.captureStarted.emit()
-            self.plot_widget.setLimits(xMin=0, xMax=1.5)
+            self.plot_widget.setLimits(xMin=0)
             self.is_capturing = True
         else:
             self.restart_queued = True
@@ -688,13 +690,11 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_plot.setData(y=pxx, x=f)
         self._last_fft_update = perf_counter_ns()
 
-    def screenshotTimePlot(self, plot):
-        exporter = pyqtgraph.exporters.ImageExporter(self.plot_widget.getPlotItem())
-        exporter.export('time_plot.png')
-
-    def screenshotFFTPlot(self, plot):
-        exporter = pyqtgraph.exporters.ImageExporter(self.fft_plot_widget.getPlotItem())
-        exporter.export('fft_plot.png')
+    def setRollingView(self, enable):
+        if(enable == QtCore.Qt.CheckState.Checked):
+            self.rolling_view = True
+        else:
+            self.rolling_view = False
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):

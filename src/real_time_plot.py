@@ -1,17 +1,18 @@
-from pyqtgraph import PlotWidget, PlotCurveItem, PlotItem
+from pyqtgraph import PlotWidget, PlotCurveItem, PlotItem, InfiniteLine
 import pyqtgraph
 from dvg_ringbuffer import RingBuffer
 from time import perf_counter_ns
 import numpy
 import tsdownsample
+from utils import RollingRingBuffer
 
 class RealTimePlot(PlotWidget):
-    def initializeGraphs(self, fs, total_channels):
-        time_length = 1.5 # Data buffer length in seconds
-        self.buffer_size = int(fs*time_length)
+    def initializeGraphs(self, fs, total_channels, buffer_size, rolling_view):
+        self.buffer_size = buffer_size
         self._last_update = 0
         self._received = 0
         self.time_buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
+        self.rolling_view = rolling_view
         # Generate plots for time-domain graphing
         self.plots = []
         self.buffers = []
@@ -23,8 +24,16 @@ class RealTimePlot(PlotWidget):
             plot.setSegmentedLineMode('on')
             self.addItem(plot)
             self.plots.append(plot)
-            buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
+            if(self.rolling_view):
+                buffer = RollingRingBuffer(capacity=self.buffer_size, dtype='float64')
+            else:
+                buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
             self.buffers.append(buffer)
+        if self.rolling_view:
+            self.time_buffer.extend(range(self.buffer_size))
+            self.roll_line = InfiniteLine(pen='r')
+            self.addItem(self.roll_line)
+            self.setLimits(xMin=self.time_buffer[0], xMax=self.time_buffer[-1])
 
     def cleanup(self):
         print("Cleaning up")
@@ -32,25 +41,32 @@ class RealTimePlot(PlotWidget):
         for plot in self.plots:
             self.removeItem(plot)
             plot.deleteLater()
+        if self.rolling_view:
+            self.removeItem(self.roll_line)
+            self.roll_line.deleteLater()
 
     def updatePlots(self, channels, data, time_range):
-        self.update_rate = 5
-        # Scrolling faster than our update rate makes the graphing feel smoother
-        self.scroll_rate = 30
-        self.time_buffer.extend(time_range)
-        self._received += 1
+        self.update_rate = 30
+
+        if not self.rolling_view:
+            # Scrolling faster than our update rate makes the graphing feel smoother
+            self.scroll_rate = 30
+            self.time_buffer.extend(time_range)
+            self._received += 1
+            if perf_counter_ns() > self._last_update + ((10**9)/self.scroll_rate):
+                if self.time_buffer.is_full:
+                    time_unit = time_range[1] - time_range[0]
+                    self.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + time_unit)*self._received)
+                    self.setLimits(xMin=self.time_buffer[0], xMax=self.time_buffer[-1])
+                self._received = 0
+        
         for i, channel in enumerate(channels):
             self.buffers[channel].extend(data[i])
-        if perf_counter_ns() > self._last_update + ((10**9)/self.scroll_rate):
-            if self.time_buffer.is_full:
-                time_unit = time_range[1] - time_range[0]
-                self.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + time_unit)*self._received)
-                self.setLimits(xMin=self.time_buffer[0], xMax=self.time_buffer[-1])
-            self._received = 0
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
+        if self.rolling_view: self.roll_line.setPos(self.buffers[channels[0]]._idx_L)
         self._last_update = perf_counter_ns()
-        time_unit = time_range[1] - time_range[0]
+        time_unit = self.time_buffer[1] - self.time_buffer[0]
         (w,h) = self.getViewBox().viewPixelSize()
         [[xmin, xmax], [ymin, ymax]] = self.getViewBox().viewRange()
         block_size = int(numpy.ceil(w / time_unit))

@@ -4,6 +4,7 @@ import pyqtgraph.exporters
 from PyQt6 import QtWidgets, QtGui
 import numpy as np
 import math
+from dvg_ringbuffer import RingBuffer
 
 # Class that inherits from AxisItem to provide better tick display for logarithmic axes.
 # TODO: Add detection for text overlapping, not clear if I can use boundingRect for this
@@ -122,3 +123,23 @@ class CustomPlotItem(PlotItem):
                 self.ssBtn.hide()
         except RuntimeError:
             pass  # this can happen if the plot has been deleted.
+
+# Ring buffer that wraps around to the beginning when full
+class RollingRingBuffer(RingBuffer):
+    def _unwrap_into_buffer(self):
+        """Copy the data from this buffer into unwrapped form to the unwrap
+        buffer at a fixed memory address. Only call when the buffer is full.
+        """
+        if self._unwrap_buffer_is_dirty:
+            # print("Unwrap buffer was dirty")
+            np.concatenate(
+                (
+                    self._arr[: max(self._idx_R - self._N, 0)],
+                    self._arr[self._idx_L : min(self._idx_R, self._N)],
+                ),
+                out=self._unwrap_buffer,
+            )
+            self._unwrap_buffer_is_dirty = False
+        else:
+            # print("Unwrap buffer was clean")
+            pass
