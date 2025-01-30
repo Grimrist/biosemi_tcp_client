@@ -11,6 +11,8 @@ class RealTimePlot(PlotWidget):
         self.buffer_size = buffer_size
         self._last_update = 0
         self._received = 0
+        self.offset_factor = 2
+        self.avgs = numpy.zeros(total_channels)
         self.time_buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
         self.rolling_view = rolling_view
         # Generate plots for time-domain graphing
@@ -34,7 +36,7 @@ class RealTimePlot(PlotWidget):
             self.roll_line = InfiniteLine(pen='r')
             self.addItem(self.roll_line)
             self.setLimits(xMin=self.time_buffer[0], xMax=self.time_buffer[-1])
-
+        
     def cleanup(self):
         print("Cleaning up")
         self.is_capturing = False
@@ -61,10 +63,17 @@ class RealTimePlot(PlotWidget):
                 self._received = 0
         
         for i, channel in enumerate(channels):
-            self.buffers[channel].extend(data[i])
+            self.buffers[channel].extend(data[i] - self.avgs[channel])
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
-        if self.rolling_view: self.roll_line.setPos(self.buffers[channels[0]]._idx_L)
+        if self.rolling_view: 
+            self.roll_line.setPos(self.buffers[channels[0]]._idx_L)
+            print(data.shape[1])
+            if self.buffers[channels[0]]._idx_L >= self.buffer_size-(4*data.shape[1]):
+                print("Calculating avg")
+                for channel in channels:
+                    self.avgs[channel] = numpy.average(self.buffers[channel] + self.avgs[channel])
+
         self._last_update = perf_counter_ns()
         time_unit = self.time_buffer[1] - self.time_buffer[0]
         (w,h) = self.getViewBox().viewPixelSize()
@@ -73,7 +82,6 @@ class RealTimePlot(PlotWidget):
         num_bin = int(numpy.ceil((len(self.time_buffer) // block_size)/2.) * 2)
         if num_bin < 3:
             num_bin = 3
-        self.offset_factor = 0
         for i, channel in enumerate(channels):
             buffer = self.buffers[channel].__array__() - self.offset_factor*i
             if not ((buffer >= ymin) & (buffer <= ymax)).any():

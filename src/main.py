@@ -106,8 +106,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # self.selection_window.decimating_taps_box.valueChanged.connect(self.settings_handler.setLowpassTaps)
 
         # View control
-        self.selection_window.rolling_checkbox.clicked.connect(self.graph_window.setRollingView)
-        self.selection_window.rolling_checkbox.clicked.connect(self.settings_handler.setRollingEnabled)
+        self.selection_window.rolling_checkbox.checkStateChanged.connect(self.graph_window.setRollingView)
+        self.selection_window.rolling_checkbox.checkStateChanged.connect(self.settings_handler.setRollingEnabled)
 
         # FFT settings
         self.selection_window.welch_window_box.valueChanged.connect(self.settings_handler.setWelchWindow)
