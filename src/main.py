@@ -80,6 +80,7 @@ class MainWindow(QtWidgets.QMainWindow):
         main_widget.setLayout(main_layout)
 
         ### Signal connections
+
         # Connection settings
         self.selection_window.ip_box.textChanged.connect(self.settings_handler.setIp)
         self.selection_window.port_box.textChanged.connect(self.settings_handler.setPort)
@@ -190,6 +191,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.electrodes_model.itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(False))
         for i in selection.indexes():
             self.electrodes_model.itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(True))
+        self.graph_window.setActiveChannels()
 
     def setReference(self, selection, deselection):
         for i in range(self.electrodes_model.rowCount()):
@@ -599,7 +601,13 @@ class GraphWindow(QtWidgets.QWidget):
         total_channels = self.electrodes_model.rowCount()
         time_length = 8 # Data buffer length in seconds
         self.buffer_size = int(fs*time_length)
-        self.plot_widget.initializeGraphs(fs, total_channels, self.buffer_size, self.rolling_view)
+        active_channels = []
+        for i in range(total_channels):
+            # Select active channels
+            idx = self.electrodes_model.index(i,1)
+            if self.electrodes_model.itemFromIndex(idx).data(): 
+                active_channels.append(i)
+        self.plot_widget.initializeGraphs(fs, total_channels, self.buffer_size, self.rolling_view, active_channels)
         self._last_fft_update = 0
         # Generate plot for FFT graphing
         self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), skipFiniteCheck=True)
@@ -695,6 +703,17 @@ class GraphWindow(QtWidgets.QWidget):
             self.rolling_view = True
         else:
             self.rolling_view = False
+
+    def setActiveChannels(self):
+        total_channels = self.electrodes_model.rowCount()
+        active_channels = []
+        for i in range(total_channels):
+            # Select active channels
+            idx = self.electrodes_model.index(i,1)
+            if self.electrodes_model.itemFromIndex(idx).data(): 
+                active_channels.append(i)
+        self.plot_widget.setActiveChannels(active_channels, total_channels)
+        self.fft_worker.setActiveChannels(active_channels)
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):

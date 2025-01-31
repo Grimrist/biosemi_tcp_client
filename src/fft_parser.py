@@ -24,8 +24,9 @@ class FFTWorker(QtCore.QObject):
     def terminate(self):
         self.finished.emit()
 
-    def updateBuffers(self, channel, samples):
-        self.welch_buffers[channel].extend(samples)
+    def updateBuffers(self, samples):
+        for i, channel in enumerate(samples):
+            self.welch_buffers[i].extend(channel)
 
     def initializeBuffers(self, total_channels):
         self.welch_buffers = []
@@ -46,6 +47,9 @@ class FFTWorker(QtCore.QObject):
             if self.electrodes_model.itemFromIndex(idx).data(): 
                 self.active_channels.append(i)
         self.initializeBuffers(self.total_channels)
+
+    def setActiveChannels(self, channels):
+        self.active_channels = channels
 
     def plotFFT(self):
         active_buffers = []

@@ -10,9 +10,9 @@ from time import sleep
 class DataWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
     finishedCapture = QtCore.pyqtSignal()
-    welchBufferChanged = QtCore.pyqtSignal(int, numpy.ndarray)
+    welchBufferChanged = QtCore.pyqtSignal(numpy.ndarray)
     triggerFFT = QtCore.pyqtSignal()
-    newDataReceived = QtCore.pyqtSignal(list, numpy.ndarray, numpy.ndarray)
+    newDataReceived = QtCore.pyqtSignal(numpy.ndarray, numpy.ndarray)
 
     def __init__(self, settings, electrodes_model, freq_bands_model, plots):
         super().__init__()
@@ -140,7 +140,7 @@ class DataWorker(QtCore.QObject):
 
                     # Copy bytes into new 4-byte array, change view to uint32, filter by only the channels we need and squeeze dimensions
                     padded_array[:,:,-3:] = deinterleave_data
-                    samples = padded_array.view('int32')[[active_channels], :].reshape(len(active_channels), self.samples)
+                    samples = padded_array.view('int32').reshape(total_channels, self.samples)
 
                     # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
                     if(active_reference > -1):
@@ -156,12 +156,11 @@ class DataWorker(QtCore.QObject):
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag
                     # Since we're working with an entire set of samples, we need the corresponding x values
                     samples_time = numpy.linspace(x/self.fs, (x+self.samples-1)/self.fs, num=self.samples)
-                    self.newDataReceived.emit(active_channels, samples, samples_time)
+                    self.newDataReceived.emit(samples, samples_time)
 
                     if welch_enabled:
                         # Update FFT worker's data storage
-                        for i, channel in enumerate(active_channels):
-                            self.welchBufferChanged.emit(channel, samples[i])
+                        self.welchBufferChanged.emit(samples)
                         # Queue up an fft calculation
                         if x % update_rate == 0:
                             self.triggerFFT.emit()
