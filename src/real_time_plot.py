@@ -98,8 +98,8 @@ class RealTimePlot(PlotWidget):
 
         # If rolling view, then we want to draw the scrolling red line, as well as try to lump the data together
         if self.rolling_view: 
-            self.roll_line.setPos(self.buffers[self.active_channels[0]]._idx_L)
-            if self.buffers[self.active_channels[0]]._idx_L >= self.buffer_size-(4*data.shape[1]):
+            self.roll_line.setPos(self.buffers[0]._idx_L)
+            if self.buffers[0]._idx_L >= self.buffer_size-(4*data.shape[1]):
                 print("Calculating avg")
                 for channel in range(len(self.buffers)):
                     self.avgs[channel] = numpy.average(self.buffers[channel] + self.avgs[channel])

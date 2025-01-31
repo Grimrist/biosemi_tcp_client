@@ -56,6 +56,9 @@ class FFTWorker(QtCore.QObject):
         self.ref_channel = channel
 
     def plotFFT(self):
+        # No channels selected, so we don't plot anything
+        if len(self.active_channels) == 0:
+            return
         active_buffers = []
         if self.ref_channel != -1:
             ref = self.welch_buffers[self.ref_channel]
@@ -69,6 +72,8 @@ class FFTWorker(QtCore.QObject):
         pxx[pxx == 0] = 0.0000000001
         log_pxx = 10*numpy.log10(pxx*1000)
         self.newDataReceived.emit(f, log_pxx)
+
+        # Determine our new frequency band values, and then update our model so the rest of the app gets notified
         divs = []
         for band, [lower, upper] in global_vars.FREQ_BANDS.items():
             freq_filter = (f >= lower) & (f <= upper)
