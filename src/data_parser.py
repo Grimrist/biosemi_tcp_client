@@ -140,7 +140,7 @@ class DataWorker(QtCore.QObject):
 
                     # Copy bytes into new 4-byte array, change view to uint32, filter by only the channels we need and squeeze dimensions
                     padded_array[:,:,-3:] = deinterleave_data
-                    samples = padded_array.view('int32')[[active_channels], :].reshape(len(active_channels), self.samples)
+                    samples = padded_array.view('int32').reshape(total_channels, self.samples)
 
                     # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
                     if(active_reference > -1):
@@ -150,7 +150,6 @@ class DataWorker(QtCore.QObject):
 
                     # We apply the reference value and gain
                     samples = (samples - ref_values)*self.gain
-                    active_buffers = []
 
                     # Send sample to plot
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag

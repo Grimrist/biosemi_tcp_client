@@ -5,6 +5,7 @@ from time import perf_counter_ns
 import numpy
 import tsdownsample
 from utils import PlotMultiCurveItem
+import colorsys
 
 class RealTimePlot(PlotWidget):
     def initializeGraphs(self, fs, total_channels):
@@ -12,20 +13,25 @@ class RealTimePlot(PlotWidget):
         self.buffer_size = int(fs*time_length)
         self._last_update = 0
         self._received = 0
-        self.time_buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
+        self.time_buffer = RingBuffer(capacity=self.buffer_size, dtype='float32')
+        self.time_buffer.extend(numpy.zeros(self.buffer_size))
         # Generate plots for time-domain graphing
         self.plots = []
         self.buffers = []
         # Pre-emptively generate color array for curves
-        self.colors = numpy.zeros((total_channels, 4))
+        self.colors = numpy.zeros((total_channels*self.buffer_size, 4))
         for i in range(total_channels):
-            self.colors[i,:] = [i/(total_channels), 0.8, 0.9, 1]
-        self.plot = PlotMultiCurveItem(skipFiniteCheck=True, connect='pairs', clickable=True)
+            color = colorsys.hsv_to_rgb(i/(total_channels), 0.8, 0.9)
+            self.colors[(i*self.buffer_size):(i+1)*self.buffer_size,:] = [color[0], color[1], color[2], 1]
+        print(self.colors)
+        self.plot = PlotMultiCurveItem(skipFiniteCheck=True, clickable=True)
         self.plot.sigClicked.connect(self.autoscaleToData)
         self.plot.setSkipFiniteCheck(True)
         self.plot.setSegmentedLineMode('on')
+        self.plot.setColors(self.colors)
         self.addItem(self.plot)
-        buffer = RingBuffer(capacity=self.buffer_size, dtype='float64')
+        buffer = RingBuffer(capacity=self.buffer_size, dtype=('float32', total_channels))
+        buffer.extend(numpy.tile(numpy.zeros(self.buffer_size),64).reshape(self.buffer_size, total_channels))
         self.buffers.append(buffer)
 
     def cleanup(self):
@@ -35,13 +41,13 @@ class RealTimePlot(PlotWidget):
         self.plot.deleteLater()
 
     def updatePlots(self, channels, data, time_range):
-        self.update_rate = 5
+        self.update_rate = 20
         # Scrolling faster than our update rate makes the graphing feel smoother
         self.scroll_rate = 30
         self.time_buffer.extend(time_range)
         self._received += 1
-        for i, channel in enumerate(channels):
-            self.buffers[channel].extend(data[i])
+        self.buffers[0].extend(numpy.transpose(data))
+        # print(self.buffers[0])
         if perf_counter_ns() > self._last_update + ((10**9)/self.scroll_rate):
             if self.time_buffer.is_full:
                 time_unit = time_range[1] - time_range[0]
@@ -51,21 +57,21 @@ class RealTimePlot(PlotWidget):
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
         self._last_update = perf_counter_ns()
-        time_unit = time_range[1] - time_range[0]
-        (w,h) = self.getViewBox().viewPixelSize()
-        [[xmin, xmax], [ymin, ymax]] = self.getViewBox().viewRange()
-        block_size = int(numpy.ceil(w / time_unit))
-        num_bin = int(numpy.ceil((len(self.time_buffer) // block_size)/2.) * 2)
-        if num_bin < 3:
-            num_bin = 3
-        self.offset_factor = 400
-        # buffer = self.buffers[channel].__array__() - self.offset_factor*i
-        if not ((buffer >= ymin) & (buffer <= ymax)).any():
-            continue
+        # time_unit = time_range[1] - time_range[0]
+        # (w,h) = self.getViewBox().viewPixelSize()
+        # [[xmin, xmax], [ymin, ymax]] = self.getViewBox().viewRange()
+        # block_size = int(numpy.ceil(w / time_unit))
+        # num_bin = int(numpy.ceil((len(self.time_buffer) // block_size)/2.) * 2)
+        # if num_bin < 3:
+        #     num_bin = 3
+        self.offset_factor = numpy.arange(0, len(channels)*400, 400)
+        buffer = self.buffers[0].__array__()[:,channels] - self.offset_factor[None]
+        # if not ((buffer >= ymin) & (buffer <= ymax)).any():
+        #     continue
         time = self.time_buffer.__array__()
-        view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
-        clip = numpy.clip(buffer[view], a_min=ymin, a_max=ymax)
-        self.plot.setData(y=clip, x=time[view], colors=color)
+        # view = tsdownsample.MinMaxLTTBDownsampler().downsample(buffer, n_out=num_bin, parallel=True)
+        # clip = numpy.clip(buffer, a_min=ymin, a_max=ymax)
+        self.plot.setData(y=buffer.T, x=time)
 
     def autoscaleToData(self, item):
         idx = self.plots.index(item)

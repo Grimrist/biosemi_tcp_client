@@ -1,6 +1,7 @@
 from pyqtgraph import AxisItem, PlotCurveItem
 import numpy as np
 import math
+import sys
 
 # Class that inherits from AxisItem to provide better tick display for logarithmic axes.
 # TODO: Add detection for text overlapping, not clear if I can use boundingRect for this
@@ -90,6 +91,7 @@ class LogAxis(AxisItem):
 # My intent is to only support the OpenGL backend for this purpose,
 # but I might need to adjust all the methods regardless.
 class PlotMultiCurveItem(PlotCurveItem):
+    
     def updateData(self, *args, **kargs):
         # profiler = debug.Profiler()
 
@@ -112,8 +114,8 @@ class PlotMultiCurveItem(PlotCurveItem):
             if isinstance(data, list):
                 data = np.array(data)
                 kargs[k] = data
-            if not isinstance(data, np.ndarray) or data.ndim > 1:
-                raise Exception("Plot data must be 1D ndarray.")
+            if not isinstance(data, np.ndarray):
+                raise Exception("Plot data must be ndarray.")
             if data.dtype.kind == 'c':
                 raise Exception("Can not plot complex data types.")
 
@@ -143,8 +145,8 @@ class PlotMultiCurveItem(PlotCurveItem):
             if len(self.xData) != len(self.yData)+1:  ## allow difference of 1 for step mode plots
                 raise Exception("len(X) must be len(Y)+1 since stepMode=True (got %s and %s)" % (self.xData.shape, self.yData.shape))
         else:
-            if self.xData.shape != self.yData.shape:  ## allow difference of 1 for step mode plots
-                raise Exception("X and Y arrays must be the same shape--got %s and %s." % (self.xData.shape, self.yData.shape))
+            if self.xData.ndim != 1:  ## allow difference of 1 for step mode plots
+                raise Exception("X arrays must be 1D--got %s" % (self.xData.shape))
 
         self.path = None
         self.fillPath = None
@@ -233,17 +235,16 @@ class PlotMultiCurveItem(PlotCurveItem):
 
         try:
             x, y = self.getData()
-            pos = np.empty((len(x), 2), dtype=np.float32)
-            colors = self.colors()
-            pos[:,0] = x
-            pos[:,1] = y
+            pos = np.empty((y.shape[0]*y.shape[1],2), dtype=np.float32)
+            colors = self.colors
+            pos[:,0] = np.tile(x, (y.shape[0], 1)).flatten()
+            pos[:,1] = y.flatten()
             gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
+            gl.glEnableClientState(gl.GL_COLOR_ARRAY)
             try:
-                gl.glVertexPointerf(pos)
+                gl.glVertexPointer(2,gl.GL_FLOAT, 0, pos)
                 gl.glColorPointerf(colors)
-                width = pen.width()
-                if pen.isCosmetic() and width < 1:
-                    width = 1
+                width = 1
                 gl.glPointSize(width)
                 gl.glLineWidth(width)
 
@@ -259,9 +260,10 @@ class PlotMultiCurveItem(PlotCurveItem):
                     gl.glHint(gl.GL_LINE_SMOOTH_HINT, gl.GL_NICEST)
                 else:
                     gl.glDisable(gl.GL_LINE_SMOOTH)
-
-                gl.glDrawArrays(gl.GL_LINES, 0, pos.shape[0])
+                # print("Passing parameters:", gl.GL_LINE_STRIP, np.arange(0, pos.shape[0], y.shape[1]), np.tile(y.shape[1],y.shape[0]), y.shape[0])
+                gl.glMultiDrawArrays(gl.GL_LINE_STRIP, np.arange(0, pos.shape[0], y.shape[1]), np.tile(y.shape[1],y.shape[0]), y.shape[0])
             finally:
                 gl.glDisableClientState(gl.GL_VERTEX_ARRAY)
+                gl.glDisableClientState(gl.GL_COLOR_ARRAY)
         finally:
             p.endNativePainting()
