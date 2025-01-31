@@ -199,6 +199,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.electrodes_model.itemFromIndex(idx).setData(QtCore.QVariant(False))
         for i in selection.indexes():
             self.electrodes_model.itemFromIndex(i.siblingAtColumn(2)).setData(QtCore.QVariant(True))
+        self.graph_window.setReferenceChannel()
 
     def startSerial(self):
         port = self.settings['serial']['port']
@@ -714,6 +715,17 @@ class GraphWindow(QtWidgets.QWidget):
                 active_channels.append(i)
         self.plot_widget.setActiveChannels(active_channels, total_channels)
         self.fft_worker.setActiveChannels(active_channels)
+
+    def setReferenceChannel(self):
+        total_channels = self.electrodes_model.rowCount()
+        active_reference = -1
+        for i in range(total_channels):
+            # Select reference channels
+            idx = self.electrodes_model.index(i,2)
+            if self.electrodes_model.itemFromIndex(idx).data():
+                active_reference = i
+        self.plot_widget.setReferenceChannel(active_reference)
+        self.fft_worker.setReferenceChannel(active_reference)
 
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):

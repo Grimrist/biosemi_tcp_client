@@ -46,7 +46,7 @@ class DataWorker(QtCore.QObject):
     def terminate(self):
         self.is_capturing = False
 
-    def initializeData(self, settings, electrodes_model, freq_bands_model):
+    def initializeData(self, settings, freq_bands_model):
         ## Initialize all data derived from the client configuration
         self.samples = settings['biosemi']['samples']
         self.fs = settings['biosemi']['fs']
@@ -60,7 +60,7 @@ class DataWorker(QtCore.QObject):
 
     def readData(self):
         global cuda_enabled
-        self.initializeData(self.settings, self.electrodes_model, self.freq_bands_model)
+        self.initializeData(self.settings, self.freq_bands_model)
         x = 0
         packet_failed = 0
         active_channels = []
@@ -84,24 +84,6 @@ class DataWorker(QtCore.QObject):
         # how often we need to update in terms of samples received
         update_rate = int(numpy.ceil(self.fs / 20 / self.samples))
         print("Update rate in packet count (aiming for 20 Hz):", update_rate)
-
-        # Determine which channels we're interested in reading from
-        for i in range(total_channels):
-            # Select active channels
-            idx = self.electrodes_model.index(i,1)
-            if self.electrodes_model.itemFromIndex(idx).data(): 
-                active_channels.append(i)
-            # Select reference point
-            idx = self.electrodes_model.index(i,2)
-            if self.electrodes_model.itemFromIndex(idx).data():
-                active_reference = i
-
-        # If there are no active channels, we have nothing to capture, so we abort
-        if len(active_channels) == 0:
-            print("No channels selected, stopping capture")
-            self.sock.close()
-            self.finished.emit()
-            return
 
         attempt_counter = 0
         sample_counter = 0
@@ -142,15 +124,9 @@ class DataWorker(QtCore.QObject):
                     padded_array[:,:,-3:] = deinterleave_data
                     samples = padded_array.view('int32').reshape(total_channels, self.samples)
 
-                    # To increase CMRR, we can pick a reference point and subtract it from every other point we are reading
-                    if(active_reference > -1):
-                        ref_values = padded_array.view('int32')[active_reference, :].reshape(1, self.samples)
-                    else:
-                        ref_values = numpy.zeros(self.samples)
-
-                    # We apply the reference value and gain
-                    samples = (samples - ref_values)*self.gain
-                    active_buffers = []
+                    # We apply the pre-defined gain
+                    # TODO: Consider pulling this out of data parser completely?
+                    samples = samples*self.gain
 
                     # Send sample to plot
                     # Rate limited to only calculate the spectrum every once in a while, to avoid lag

@@ -20,6 +20,7 @@ class FFTWorker(QtCore.QObject):
         self.settings = settings
         self.electrodes_model = electrodes_model
         self.freq_bands_model = freq_bands_model
+        self.ref_channel = -1
 
     def terminate(self):
         self.finished.emit()
@@ -51,10 +52,17 @@ class FFTWorker(QtCore.QObject):
     def setActiveChannels(self, channels):
         self.active_channels = channels
 
+    def setReferenceChannel(self, channel):
+        self.ref_channel = channel
+
     def plotFFT(self):
         active_buffers = []
+        if self.ref_channel != -1:
+            ref = self.welch_buffers[self.ref_channel]
+        else:
+            ref = 0
         for i in self.active_channels:
-            active_buffers.append(self.welch_buffers[i])
+            active_buffers.append(self.welch_buffers[i].__array__() - ref)
         active_buffers = numpy.vstack(active_buffers)
         avg_buffer = numpy.average(active_buffers, axis=0)
         f, pxx = signal.welch(x=avg_buffer, fs=self.fs, nperseg=self.welch_window//5)

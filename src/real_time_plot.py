@@ -10,6 +10,7 @@ class RealTimePlot(PlotWidget):
     def __init__(self, parent=None, background='default', plotItem=None, **kargs):
         super().__init__(parent, background, plotItem, **kargs)
         self._init = False
+        self.ref_channel = -1
 
     def initializeGraphs(self, fs, total_channels, buffer_size, rolling_view, active_channels):
         self.buffer_size = buffer_size
@@ -62,6 +63,9 @@ class RealTimePlot(PlotWidget):
                     self.plots[i].show()
                 else: self.plots[i].hide()
 
+    def setReferenceChannel(self, channel):
+        self.ref_channel = channel
+
     def updatePlots(self, data, time_range):
         self.update_rate = 30
 
@@ -78,10 +82,16 @@ class RealTimePlot(PlotWidget):
                 self._received = 0
         
         # Fill buffers with the new data
+        # TODO: Rethink this, the reference should definitely not be applied directly to our storage
+        if self.ref_channel != -1:
+            ref = data[self.ref_channel]
+        else:
+            ref = 0
         for i, channel in enumerate(data):
-            self.buffers[i].extend(channel - self.avgs[i])
+            self.buffers[i].extend((channel - ref) - self.avgs[i])
 
         # Only request to draw the data at our specified update rate
+        # This could potentially be completely replaced by a QTimer
         if perf_counter_ns() < self._last_update + ((10**9)/self.update_rate):
             return
         self._last_update = perf_counter_ns()
@@ -104,6 +114,10 @@ class RealTimePlot(PlotWidget):
             num_bin = 3
 
         # Plot the data based on the currently active channels
+        # If no channels are selected, we don't need to plot anything.
+        if len(self.active_channels) == 0:
+            return
+        # Loop through active channels and plot only the ones we want
         for i, channel in enumerate(self.active_channels):
             buffer = self.buffers[channel].__array__() - self.offset_factor*i
             if not ((buffer >= ymin) & (buffer <= ymax)).any():
