@@ -1,5 +1,6 @@
 from PyQt6 import QtCore, QtSerialPort
 
+# Class that handles setting up underlying serial communication, as well as writing and sending data
 class SerialHandler(QtCore.QObject):
     def __init__(self, write_enabled):
         super().__init__()

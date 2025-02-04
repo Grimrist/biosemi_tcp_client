@@ -30,8 +30,7 @@ from file_tab import FileTab
 from real_time_plot import RealTimePlot
 from utils import LogAxis, CustomPlotItem
 
-# MainWindow holds all other windows, initializes the settings,
-# and connects every needed signal to its respective slot.
+# MainWindow holds all other windows, initializes the settings, and connects every needed signal to its respective slot.
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -134,10 +133,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.file_tab.directoryChanged.connect(self.settings_handler.setDirectory)
         self.selection_window.file_tab.doubleClickedFile.connect(self.graph_window.startCapture)
 
-        # Consider making double click start the debug capture immediately?
-        # self.file_view.doubleClicked.connect()
-        ###
-
         # Show window
         self.setCentralWidget(main_widget)
         self.show()
@@ -167,6 +162,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 ref_status.setData(QtCore.QVariant(False))
                 self.electrodes_model.appendRow([name, view_status, ref_status])
 
+    # Initializes model for band display as well as storing threshold information
     def initializeBands(self):
         if self.freq_bands_model is not None:
             self.freq_bands_model.clear()
@@ -178,14 +174,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 else: data.append([k, 0, 1, False])
             self.freq_bands_model = FreqTableModel(data, ["Bands", "Relative Power", "Threshold", "Status"])
 
+    # Sets the total amount of channels and re-initializes electrodes model to update the UI
     def setTotalChannels(self, channels):
         self.settings_handler.setChannels(channels)
         self.initializeElectrodes()
 
+    # Enables EX-Electrodes and re-initializes electrodes model
     def setExEnabled(self, enable):
         self.settings_handler.setExEnabled(enable)
         self.initializeElectrodes()
 
+    # Updates electrodes model with the currently selected channels in the UI
     def setActiveChannels(self, selection, deselection):
         for i in deselection.indexes():
             self.electrodes_model.itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(False))
@@ -193,6 +192,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.electrodes_model.itemFromIndex(i.siblingAtColumn(1)).setData(QtCore.QVariant(True))
         self.graph_window.setActiveChannels()
 
+    # Updates electrodes model with the currently selected reference in the UI
     def setReference(self, selection, deselection):
         for i in range(self.electrodes_model.rowCount()):
             idx = self.electrodes_model.index(i, 2)
@@ -206,6 +206,7 @@ class MainWindow(QtWidgets.QMainWindow):
         baud = int(self.settings['serial']['baud_rate'])
         self.serial_handler.startSerial(port, baud)
 
+    # Attempts to safely close the program. Doesn't work very reliably right now
     def closeEvent(self, event):
         self.settings_handler.saveSettings()
         self.graph_window.stopCapture()
@@ -218,10 +219,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.selection_window.freq_bands_view.close()
         event.accept()        
 
-# SelectionWindow implements all the configuration UI,
-# as well as handling its' display on the interface.
-# Pending to implement: QScrollArea to contain all the widgets,
-# to allow adding even more options.
+# SelectionWindow implements all the configuration UI.
+# Pending to implement: QScrollArea to contain all the widgets, to allow further expanding of the UI.
+# Potential TODO: Break this up into individual functions or even classes. I'm not sure if I'm a fan of this
+# because it might become really cluttered with what's otherwise just simple composition
 class SelectionWindow(QtWidgets.QTabWidget):
     sendSerial = QtCore.pyqtSignal(bytes)
 
@@ -493,6 +494,7 @@ class SelectionWindow(QtWidgets.QTabWidget):
         measurements_window.setLayout(measurements_layout)
         self.addTab(measurements_window, "Measurements")
 
+    # Updates indicators when the model signals that it has surpassed the set threshold
     def updateThresholdDisplay(self, index, status):
         band = self.band_indicators[index.row()][0].text().split()[0]
         color = pyqtgraph.mkColor("#808080")
@@ -506,20 +508,21 @@ class SelectionWindow(QtWidgets.QTabWidget):
             self.band_indicators[index.row()][1].setPixmap(self.black_icon)
             self.freq_bands_chart.setOpts(brushes=[color]*5)
 
-        ## Temporary placement, this might need its own class
+        # Send signal to connected serial output (e.g Arduino)
         if band == "Alpha":
             if status:
                 self.sendEnableSignal()
             else:
                 self.sendDisableSignal()
 
+    # TODO: Expose this in the configuration side so that you can specify the signals
     def sendDisableSignal(self):
         self.sendSerial.emit(b'0')
 
     def sendEnableSignal(self):
         self.sendSerial.emit(b'1')
 
-    # These two functions really need to be generalized
+    # Sets the threshold for the frequency band detection, either from the line or via manual input
     def setAlphaThreshold(self, value):
         alpha = self.freq_bands_model.match(self.freq_bands_model.index(0,0), QtCore.Qt.ItemDataRole.DisplayRole, "Alpha")[0]
         self.freq_bands_model.setData(alpha.siblingAtColumn(2), value)
@@ -556,6 +559,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.plots = []
         self.initializeWorker()
 
+    # Toggles displaying the FFT window
     def toggleFFT(self, checked):
         if(checked == QtCore.Qt.CheckState.Checked):
             self.fft_plot_widget.show()
@@ -565,7 +569,6 @@ class GraphWindow(QtWidgets.QWidget):
     # Initializes the plot widgets, alongside their axis configuration
     def initializePlotWidgets(self):
         fs = self.settings['biosemi']['fs']
-        # This should probably be exposed in the UI, for now it's just a variable for convenience
         dock_area = DockArea()
         dock_1 = Dock("Dock 1")
         dock_2 = Dock("Dock 2")
@@ -597,20 +600,23 @@ class GraphWindow(QtWidgets.QWidget):
 
         self.graph_layout.addWidget(dock_area)
 
+    # Initializes PlotDataItems in both our separate plot widget and GraphWindow
     def initializeGraphs(self):
         fs = self.settings['biosemi']['fs']
         total_channels = self.electrodes_model.rowCount()
-        time_length = 8 # Data buffer length in seconds
+        time_length = 8 # Data buffer length in seconds, consider exposing to UI
         self.buffer_size = int(fs*time_length)
+
+        # Select active channels and initialize time-domain plot
         active_channels = []
         for i in range(total_channels):
-            # Select active channels
             idx = self.electrodes_model.index(i,1)
             if self.electrodes_model.itemFromIndex(idx).data(): 
                 active_channels.append(i)
         self.plot_widget.initializeGraphs(fs, total_channels, self.buffer_size, self.rolling_view, active_channels)
+
+        # Initialize plot for FFT graphing
         self._last_fft_update = 0
-        # Generate plot for FFT graphing
         self.fft_plot = PlotDataItem(pen=pyqtgraph.hsvColor(1/(total_channels), 0.8, 0.9), skipFiniteCheck=True)
         self.fft_plot_widget.addItem(self.fft_plot)
         padding = 0
@@ -620,6 +626,7 @@ class GraphWindow(QtWidgets.QWidget):
         # I have no idea why this doesn't work for the xMin, some kind of artifact of the log implementation
         # self.fft_plot_widget.setLimits(xMin=0.01, xMax=numpy.log10(fs/2))
 
+    # Start capturing, either from an active capture or from a fully stopped state
     def startCapture(self):
         if not self.is_capturing:
             self.initializeGraphs()
@@ -630,6 +637,7 @@ class GraphWindow(QtWidgets.QWidget):
             self.restart_queued = True
             self.stopCapture()
 
+    # Stop capturing, which terminates our worker threads and cleans up plots
     def stopCapture(self):
         if not self.is_capturing:
             return
@@ -639,8 +647,9 @@ class GraphWindow(QtWidgets.QWidget):
             self.debug_worker.terminate()
         self.captureStopped.emit()
 
-    # Something is going horribly wrong every time we restart,
-    # so we just go nuclear: delete everything and rebuild.
+    # Clean up all the objects used for plotting.
+    # Having to delete all the plots is partially just technical debt from
+    # when we were using a different library, but it works so I haven't changed it
     def cleanup(self):
         self.is_capturing = False
         self.plot_widget.cleanup()
@@ -653,12 +662,14 @@ class GraphWindow(QtWidgets.QWidget):
             self.is_capturing = True
             self.restart_queued = False
 
+    # Forces thresholds to disable, used during cleanup so active thresholds don't stay on
     def disableThresholds(self):
         print("Disabling thresholds")
         for row in range(self.freq_bands_model.rowCount()):
             self.freq_bands_model.setThresholdState(row, False)
 
-    # Initialize data worker and thread
+    # Initializes thread workers, which handle data capture and FFT calculation.
+    # The workers are connected such that when they finish execution, they handle their own deletion.
     def initializeWorker(self):
         # Start our debug worker, if we're running on debug mode
         if global_vars.DEBUG:
@@ -692,6 +703,8 @@ class GraphWindow(QtWidgets.QWidget):
         self.data_thread.start()
         self.fft_thread.start()
 
+    # Requests redraw of the FFT plot with the data sent in buffer by the rate specified by fft_rate
+    # We could reduce signal overhead by moving this pseudo-timer to the FFT thread.
     def updateFFTPlot(self, f, pxx):
         self.fft_rate = 15
         if perf_counter_ns() < self._last_fft_update + ((10**9)/self.fft_rate):
@@ -699,12 +712,14 @@ class GraphWindow(QtWidgets.QWidget):
         self.fft_plot.setData(y=pxx, x=f)
         self._last_fft_update = perf_counter_ns()
 
+    # Toggles usage of rolling view (updates left to right, overwriting instead of scrolling the view)
     def setRollingView(self, enable):
         if(enable == QtCore.Qt.CheckState.Checked):
             self.rolling_view = True
         else:
             self.rolling_view = False
 
+    # Informs the underlying plots of which channels are active
     def setActiveChannels(self):
         total_channels = self.electrodes_model.rowCount()
         active_channels = []
@@ -716,6 +731,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.setActiveChannels(active_channels, total_channels)
         self.fft_worker.setActiveChannels(active_channels)
 
+    # Informs the underlying plots of which reference channel is active
     def setReferenceChannel(self):
         total_channels = self.electrodes_model.rowCount()
         active_reference = -1
@@ -727,6 +743,7 @@ class GraphWindow(QtWidgets.QWidget):
         self.plot_widget.setReferenceChannel(active_reference)
         self.fft_worker.setReferenceChannel(active_reference)
 
+# Custom class for allowing only one item selected at a time
 class SingleSelectQListView(QtWidgets.QListView):
     def __init__(self):
         super().__init__()
@@ -740,6 +757,7 @@ class SingleSelectQListView(QtWidgets.QListView):
     def mouseDoubleClickEvent(self, event):
         self.mousePressEvent(event)
 
+# Table model that allows defining a fixed table
 # For some reason, there's no existing implementation for this interface,
 # so we make our own, even though it really doesn't need to do anything fancy.
 # Currently designed as an array and can't be expanded after initialization. 

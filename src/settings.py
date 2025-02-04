@@ -79,7 +79,6 @@ class SettingsHandler():
         if self.settings['biosemi']['ex_enabled']:
             self.settings['biosemi']['channels']['EX'] = 8
 
-    # Actiview calculates this based on the channels sent, could automate?
     def setSamples(self, samples):
         self.settings['biosemi']['samples'] = int(samples)
 

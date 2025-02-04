@@ -6,12 +6,22 @@ import numpy
 import tsdownsample
 from utils import RollingRingBuffer
 
+# Custom class which allows us to plot the incoming data in real time in a somewhat optimized way,
+# allowing selection and deselection of channels and reference as it happens.
+# The rolling implementation tries to center the data onto specific points, however I believe my
+# implementation is quite suboptimal here.
+#
+# This has been tested to handle up to 64 channels at 2048 Hz. More optimizations could be done by
+# utilizing the underlying OpenGL interface directly, but this currently only exists in a branch
+# of this repository.
 class RealTimePlot(PlotWidget):
     def __init__(self, parent=None, background='default', plotItem=None, **kargs):
         super().__init__(parent, background, plotItem, **kargs)
         self._init = False
         self.ref_channel = -1
 
+    # Initializes PlotCurveItems that will hold our data for each channel, as well as every single
+    # ring buffer used to store the data.
     def initializeGraphs(self, fs, total_channels, buffer_size, rolling_view, active_channels):
         self.buffer_size = buffer_size
         self._last_update = 0
@@ -44,6 +54,7 @@ class RealTimePlot(PlotWidget):
             self.setLimits(xMin=self.time_buffer[0], xMax=self.time_buffer[-1])
         self._init = True
 
+    # Removes all plots as well as the line used to show the rolling view progress
     def cleanup(self):
         print("Cleaning up")
         self.is_capturing = False
@@ -55,6 +66,7 @@ class RealTimePlot(PlotWidget):
             self.roll_line.deleteLater()
         self._init = False
 
+    # Hides the plots that are not currently being used based on the currently active channels in the model
     def setActiveChannels(self, channels, total_channels):
         self.active_channels = channels
         if self._init:
@@ -66,6 +78,9 @@ class RealTimePlot(PlotWidget):
     def setReferenceChannel(self, channel):
         self.ref_channel = channel
 
+    # Slot that receives the data from the data reception thread, does some processing, and plots it
+    # This function is throttled by the update_rate variable, in order to not overwhelm the system,
+    # as data often comes in much faster than what we need to make a smooth plot.
     def updatePlots(self, data, time_range):
         self.update_rate = 30
 
@@ -75,6 +90,8 @@ class RealTimePlot(PlotWidget):
             self.time_buffer.extend(time_range)
             self._received += 1
             if perf_counter_ns() > self._last_update + ((10**9)/self.scroll_rate):
+                # Scrolls our view when data starts moving out of range, based on how many packets we've received
+                # since the last scroll update
                 if self.time_buffer.is_full:
                     time_unit = time_range[1] - time_range[0]
                     self.getViewBox().translateBy(x=(time_range[-1] - time_range[0] + time_unit)*self._received)
@@ -97,10 +114,10 @@ class RealTimePlot(PlotWidget):
         self._last_update = perf_counter_ns()
 
         # If rolling view, then we want to draw the scrolling red line, as well as try to lump the data together
+        # TODO: This method for lumping is not great and often takes too long to stabilize, reconsider
         if self.rolling_view: 
             self.roll_line.setPos(self.buffers[0]._idx_L)
             if self.buffers[0]._idx_L >= self.buffer_size-(4*data.shape[1]):
-                print("Calculating avg")
                 for channel in range(len(self.buffers)):
                     self.avgs[channel] = numpy.average(self.buffers[channel] + self.avgs[channel])
 
@@ -127,8 +144,11 @@ class RealTimePlot(PlotWidget):
             clip = numpy.clip(buffer[view], a_min=ymin, a_max=ymax)
             self.plots[channel].setData(y=clip, x=time[view])
 
+    # Allow snapping to a specific signal by clicking on it.
     def autoscaleToData(self, item):
+        # Determine which plots are visible
+        idx_offset = [i for i in self.plots if i.isVisible()].index(item)
         idx = self.plots.index(item)
-        min_val = numpy.min(self.buffers[idx]) - self.offset_factor*idx
-        max_val = numpy.max(self.buffers[idx]) - self.offset_factor*idx
+        min_val = numpy.min(self.buffers[idx]) - self.offset_factor*idx_offset
+        max_val = numpy.max(self.buffers[idx]) - self.offset_factor*idx_offset
         self.setYRange(min=min_val, max=max_val)
