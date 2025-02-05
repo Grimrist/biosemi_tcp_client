@@ -21,10 +21,9 @@ from time import perf_counter_ns
 import tsdownsample
 
 if len(sys.argv) > 1 and sys.argv[1] == "-d":
-    global_vars.DEBUG = True
-    from debug_source import DebugWorker
     pyqtgraph.setConfigOption('crashWarning', True)
 
+from debug_source import DebugWorker
 from serial import SerialHandler
 from file_tab import FileTab
 from real_time_plot import RealTimePlot
@@ -215,8 +214,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.graph_window.stopCapture()
         self.graph_window.data_thread.wait(100)
         self.graph_window.fft_thread.wait(100)
-        if global_vars.DEBUG:
-            self.graph_window.debug_thread.wait(100)
+        self.graph_window.debug_thread.wait(100)
         self.graph_window.fft_plot_widget.close()
         self.graph_window.plot_widget.close()
         self.selection_window.freq_bands_view.close()
