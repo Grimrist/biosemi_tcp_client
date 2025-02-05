@@ -25,18 +25,30 @@ class FileTab(QtWidgets.QWidget):
         self.file_view.clicked.connect(self.notifyFileChange)
         self.file_view.doubleClicked.connect(self.startFileDisplay)
 
-        self.start_button = QtWidgets.QPushButton("Browse")
-        self.start_button.clicked.connect(self.displayFileBrowser)
+        self.browse_button = QtWidgets.QPushButton("Browse")
+        self.browse_button.clicked.connect(self.displayFileBrowser)
         self.file_dialog = QtWidgets.QFileDialog()
-        layout.addWidget(self.start_button)
+        layout.addWidget(self.browse_button)
         layout.addWidget(self.file_view)        
+
+        # Start and stop file replay
+        button_widget = QtWidgets.QWidget()
+        button_layout = QtWidgets.QHBoxLayout()
+        self.start_button = QtWidgets.QPushButton("Play file")
+        self.stop_button = QtWidgets.QPushButton("Stop")        
+        button_layout.addWidget(self.start_button)
+        button_layout.addWidget(self.stop_button)
+        button_widget.setLayout(button_layout)
+        layout.addWidget(button_widget)
 
     # This needs to handle switching drives so that it doesn't break the sorting function
     # From what I understand, that means changing the RootPath variable (eg from C: to D:)
     def displayFileBrowser(self):
         directory = QtWidgets.QFileDialog.getExistingDirectory(options=QtWidgets.QFileDialog.Option.ShowDirsOnly)
-        self.file_view.setRootIndex(self.file_system.index(directory))
-        self.directoryChanged.emit(directory)
+        # Only change the directory if the user actually selected one
+        if directory:
+            self.file_view.setRootIndex(self.file_system.index(directory))
+            self.directoryChanged.emit(directory)
     
     def notifyFileChange(self, index):
         file = self.file_system.filePath(index)

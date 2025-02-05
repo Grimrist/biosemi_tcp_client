@@ -94,12 +94,15 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.selection_window.start_button.clicked.connect(self.graph_window.startCapture)
         self.selection_window.stop_button.clicked.connect(self.graph_window.stopCapture)
-        if global_vars.DEBUG:
-            self.graph_window.captureStarted.connect(self.graph_window.debug_worker.generateSignalFromFile)
         self.graph_window.captureStarted.connect(self.graph_window.worker.readData)
         self.graph_window.captureStarted.connect(self.graph_window.fft_worker.initializeWorker)
+        self.graph_window.startFile.connect(self.graph_window.debug_worker.generateSignalFromFile)
 
         self.selection_window.fft_checkbox.checkStateChanged.connect(self.graph_window.toggleFFT)
+
+        # File replay control
+        self.selection_window.file_tab.start_button.clicked.connect(self.graph_window.startCaptureFromFile)
+        self.selection_window.file_tab.stop_button.clicked.connect(self.graph_window.stopCapture)
 
         # Filter settings
         # self.selection_window.decimating_factor_box.valueChanged.connect(self.settings_handler.setDecimatingFactor)
@@ -541,6 +544,7 @@ class SelectionWindow(QtWidgets.QTabWidget):
 class GraphWindow(QtWidgets.QWidget):
     captureStarted = QtCore.pyqtSignal()
     captureStopped = QtCore.pyqtSignal()
+    startFile = QtCore.pyqtSignal()
 
     def __init__(self, settings, electrodes_model, freq_bands_model):
         super().__init__()
@@ -626,6 +630,14 @@ class GraphWindow(QtWidgets.QWidget):
         # I have no idea why this doesn't work for the xMin, some kind of artifact of the log implementation
         # self.fft_plot_widget.setLimits(xMin=0.01, xMax=numpy.log10(fs/2))
 
+    def startCaptureFromFile(self):
+        if not self.is_capturing:
+            self.startFile.emit()
+            self.startCapture()
+        else:
+            self.startCapture()
+            self.startFile.emit()
+
     # Start capturing, either from an active capture or from a fully stopped state
     def startCapture(self):
         if not self.is_capturing:
@@ -643,8 +655,7 @@ class GraphWindow(QtWidgets.QWidget):
             return
         self.is_capturing = False
         self.worker.terminate()
-        if global_vars.DEBUG:
-            self.debug_worker.terminate()
+        self.debug_worker.terminate()
         self.captureStopped.emit()
 
     # Clean up all the objects used for plotting.
@@ -671,16 +682,15 @@ class GraphWindow(QtWidgets.QWidget):
     # Initializes thread workers, which handle data capture and FFT calculation.
     # The workers are connected such that when they finish execution, they handle their own deletion.
     def initializeWorker(self):
-        # Start our debug worker, if we're running on debug mode
-        if global_vars.DEBUG:
-            self.debug_thread = QtCore.QThread()
-            self.debug_worker = DebugWorker(self.settings, self.electrodes_model)
-            self.debug_worker.moveToThread(self.debug_thread)
-            self.debug_worker.finished.connect(self.debug_thread.quit)
-            self.debug_worker.finished.connect(self.debug_worker.deleteLater)
-            self.debug_thread.finished.connect(self.debug_thread.deleteLater)
-            self.debug_worker.finishedRead.connect(self.stopCapture)
-            self.debug_thread.start()
+        # Start our debug worker, used to play back files
+        self.debug_thread = QtCore.QThread()
+        self.debug_worker = DebugWorker(self.settings, self.electrodes_model)
+        self.debug_worker.moveToThread(self.debug_thread)
+        self.debug_worker.finished.connect(self.debug_thread.quit)
+        self.debug_worker.finished.connect(self.debug_worker.deleteLater)
+        self.debug_thread.finished.connect(self.debug_thread.deleteLater)
+        self.debug_worker.finishedRead.connect(self.stopCapture)
+        self.debug_thread.start()
         self.data_thread = QtCore.QThread()
         self.worker = DataWorker(self.settings, self.electrodes_model, self.freq_bands_model, self.plots)
         self.worker.moveToThread(self.data_thread)

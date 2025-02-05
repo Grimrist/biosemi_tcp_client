@@ -86,7 +86,9 @@ class DebugWorker(QtCore.QObject):
                 if(len(val) > 3):
                     val = val[-3:]
                 sigbufs_bytes.extend(val)
+        print("Finished processing file, waiting for client")
         (client, port) = self.sock.accept()
+        print("Connected to client, sending data")
         for i in range(0, file_length):
             sent = client.send(sigbufs_bytes[(i*self.samples*total_channels*3):((i+1)*self.samples*total_channels*3)])
             if sent == 0:
