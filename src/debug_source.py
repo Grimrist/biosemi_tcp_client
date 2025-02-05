@@ -75,7 +75,7 @@ class DebugWorker(QtCore.QObject):
         n = f.signals_in_file
         signal_labels = f.getSignalLabels()
         print(signal_labels)
-        sigbufs = numpy.zeros((total_channels, f.getNSamples()[0]), dtype=numpy.int16)
+        sigbufs = numpy.zeros((total_channels, f.getNSamples()[0]), dtype=numpy.int32)
         for i in numpy.arange(total_channels):
             sigbufs[i, :] = f.readSignal(i)
         file_length = sigbufs.shape[1]
